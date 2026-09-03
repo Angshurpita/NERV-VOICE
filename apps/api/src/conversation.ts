@@ -1,0 +1,350 @@
+import {
+  buildReport,
+  createState,
+  escalationLabel,
+  greeting,
+  humanStatus,
+  runTurn,
+  type ConversationState,
+  type LanguageCode,
+  type Order,
+  type TurnResult,
+} from '@echosphere/core';
+import { getDatabase, type CallRow, type TicketCategory, type TicketPriority } from '@echosphere/db';
+import { priorityFor } from '@echosphere/core';
+import { config, policy } from './config.js';
+import { getModel } from './model.js';
+import { agoraService } from './agora.js';
+
+/**
+ * Call orchestration.
+ *
+ * Thin on purpose: the decisions live in `@echosphere/core`, and this layer's job
+ * is to persist what happened and create the case records the dashboard reads. It
+ * is also where a WebSocket used to be — each caller utterance is now one HTTP
+ * request, which is what lets the whole thing run as a serverless function.
+ */
+
+export interface StartCallResult {
+  callId: string;
+  caseRef: string;
+  greeting: string;
+  language: LanguageCode;
+}
+
+export async function startCall(input: {
+  language?: LanguageCode;
+  channelName?: string | null;
+  callerName?: string | null;
+  callerPhone?: string | null;
+}): Promise<StartCallResult> {
+  const db = await getDatabase(config.DATABASE_URL);
+  const language = input.language ?? 'en';
+
+  const call = await db.calls.create({
+    language,
+    channelName: input.channelName ?? null,
+    callerName: input.callerName ?? null,
+    callerPhone: input.callerPhone ?? null,
+    state: createState('pending'),
+  });
+
+  // The engine keys state by session id, which is the call id once it exists.
+  const state = createState(call.id, {}, undefined);
+  await db.calls.syncFromState(call.id, { ...state, language: { ...state.language, primary: language } });
+
+  const opening = greeting(language);
+  await db.transcripts.append({
+    callId: call.id,
+    speaker: 'agent',
+    text: opening,
+    language,
+  });
+
+  // Broadcast call initiation across Agora Signalling
+  agoraService.publishSignalling(call.id, 'call_started', {
+    callId: call.id,
+    caseRef: call.caseRef,
+    channelName: input.channelName ?? `nerv_${call.id}`,
+    language,
+  });
+
+  return { callId: call.id, caseRef: call.caseRef, greeting: opening, language };
+}
+
+export interface TurnOutcome {
+  reply: string;
+  language: LanguageCode;
+  state: ConversationState;
+  escalated: boolean;
+  escalationReason: string | null;
+  caseRef: string | null;
+  order: Order | null;
+  /** What the caller is expected to do next, for the dashboard's live view. */
+  step: string;
+}
+
+/**
+ * Process one caller utterance.
+ *
+ * Everything sequenced here is deliberate: transcript first (so a crash mid-turn
+ * still leaves a record of what the caller said), then the engine, then
+ * persistence, then case creation only if the engine actually escalated.
+ */
+export async function handleTurn(input: {
+  callId: string;
+  text: string;
+  asrConfidence?: number;
+}): Promise<TurnOutcome | { error: string }> {
+  const db = await getDatabase(config.DATABASE_URL);
+  const call = await db.calls.findById(input.callId);
+  if (!call) return { error: 'Call not found' };
+  if (call.endedAt) return { error: 'This call has already ended' };
+
+  const state = (call.state as ConversationState | null) ?? createState(call.id);
+  const history = (await db.transcripts.forCall(call.id)).map((t) => ({
+    speaker: t.speaker === 'caller' ? ('caller' as const) : ('agent' as const),
+    text: t.text,
+  }));
+
+  await db.transcripts.append({
+    callId: call.id,
+    speaker: 'caller',
+    text: input.text,
+    language: state.language.primary,
+    confidence: input.asrConfidence ?? 1,
+  });
+
+  // Signalling: broadcast incoming caller voice transcription
+  agoraService.publishSignalling(call.id, 'caller_utterance', {
+    callId: call.id,
+    text: input.text,
+    asrConfidence: input.asrConfidence ?? 1,
+  });
+
+  agoraService.publishSignalling(call.id, 'gemini_thinking', { callId: call.id });
+
+  const model = getModel();
+  let result: TurnResult;
+  try {
+    result = await runTurn(
+      { state, utterance: input.text, asrConfidence: input.asrConfidence, history },
+      {
+        policy,
+        lookupOrder: (orderId) => db.orders.lookup(orderId),
+        cancelOrder: (orderId) => db.orders.cancel(orderId),
+        callModel: (args) => model.generate(args),
+      },
+    );
+  } catch (error) {
+    console.error('[turn] engine failure', error);
+    return { error: 'The call could not be processed' };
+  }
+
+  await db.transcripts.append({
+    callId: call.id,
+    speaker: 'agent',
+    text: result.reply,
+    language: result.language,
+  });
+
+  await db.calls.syncFromState(call.id, result.state);
+
+  let caseRef: string | null = null;
+  if (result.escalated && !call.escalated) {
+    caseRef = await createCase(call, result);
+    agoraService.publishSignalling(call.id, 'escalation_triggered', {
+      callId: call.id,
+      caseRef,
+      reason: result.state.escalation.reason,
+      step: describeStep(result),
+    });
+  }
+
+  agoraService.publishSignalling(call.id, 'agent_reply', {
+    callId: call.id,
+    reply: result.reply,
+    language: result.language,
+    intent: result.state.intent,
+    confidence: result.state.confidence.overall,
+    escalated: result.escalated,
+    reason: result.escalation?.reason ?? null,
+    step: describeStep(result),
+    caseRef,
+  });
+
+  return {
+    reply: result.reply,
+    language: result.language,
+    state: result.state,
+    escalated: result.escalated,
+    escalationReason: result.escalation?.reason ?? null,
+    caseRef,
+    order: result.order,
+    step: describeStep(result),
+  };
+}
+
+/**
+ * Create the ticket + escalation pair for a handover.
+ *
+ * A ticket is created for *every* escalation rather than for every call: a call
+ * the AI resolved end to end does not need a case file, and manufacturing one
+ * would inflate the ticket queue with nothing to action. Calls remain fully
+ * queryable in their own right.
+ */
+async function createCase(call: CallRow, result: TurnResult): Promise<string> {
+  const db = await getDatabase(config.DATABASE_URL);
+  const state = result.state;
+  const reason = state.escalation.reason!;
+  const report = state.escalation.report ?? buildReport(state, result.order);
+
+  const priority: TicketPriority = priorityFor(result.order, policy);
+  const customerName = report.ordererName ?? state.customer.name ?? 'Unidentified caller';
+
+  const ticket = await db.tickets.create({
+    callId: call.id,
+    customerId: state.customer.id,
+    customerName,
+    orderId: report.orderId,
+    subject: subjectFor(reason, report.orderId),
+    description: [
+      state.escalation.detail ?? '',
+      report.statedReason ? `Caller's reason: "${report.statedReason}"` : '',
+      report.policyFindings.length > 0 ? `Findings:\n- ${report.policyFindings.join('\n- ')}` : '',
+      report.outstanding.length > 0 ? `Still open:\n- ${report.outstanding.join('\n- ')}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n'),
+    category: categoryFor(state.intent.value),
+    priority,
+    actorName: 'AI agent',
+  });
+
+  const transcript = await db.transcripts.forCall(call.id);
+  const aiSummary = await summarise(transcript, report, result.order);
+
+  await db.escalations.create({
+    callId: call.id,
+    ticketId: ticket.id,
+    customerName,
+    orderId: report.orderId,
+    reason,
+    detail: state.escalation.detail ?? escalationLabel(reason),
+    report,
+    aiSummary,
+    language: state.language.primary,
+    priority,
+    confidenceOverall: state.confidence.overall,
+  });
+
+  await db.tickets.addEvent(ticket.id, {
+    actorId: null,
+    actorName: 'AI agent',
+    kind: 'escalated',
+    toValue: escalationLabel(reason),
+    body: state.escalation.detail,
+  });
+
+  return ticket.caseRef;
+}
+
+/**
+ * Handover summary.
+ *
+ * Falls back to a deterministic summary assembled from the verification report
+ * when no model is available — which is genuinely fine, because the report
+ * already contains the facts. The model only makes it read better.
+ */
+async function summarise(
+  transcript: Array<{ speaker: string; text: string }>,
+  report: ReturnType<typeof buildReport>,
+  order: Order | null,
+): Promise<string> {
+  const deterministic = [
+    report.orderId
+      ? `Caller is asking about order ${report.orderId}${
+          report.ordererName ? `, placed by ${report.ordererName}` : ''
+        }${order ? ` (${order.items[0]?.name ?? 'item'}, currently ${humanStatus(order.status)})` : ''}.`
+      : 'No order was identified during the call.',
+    report.orderConfirmed
+      ? 'Order and identity were verified by the AI before handover.'
+      : 'Order was not fully verified.',
+    report.statedReason ? `Their stated reason: "${report.statedReason}".` : '',
+    report.policyFindings.length > 0 ? report.policyFindings.join(' ') : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  const model = getModel();
+  if (!model.available || transcript.length === 0) return deterministic;
+
+  try {
+    const text = transcript.map((t) => `${t.speaker}: ${t.text}`).join('\n');
+    const generated = await model.summarise(`${text}\n\nVerified facts: ${deterministic}`);
+    return generated || deterministic;
+  } catch {
+    return deterministic;
+  }
+}
+
+function subjectFor(reason: string, orderId: string | null): string {
+  const suffix = orderId ? ` — order ${orderId}` : '';
+  switch (reason) {
+    case 'CUSTOMER_INSISTED_HUMAN':
+      return `Caller asked for a human${suffix}`;
+    case 'REFUND_OR_RETURN':
+      return `Refund / return request${suffix}`;
+    case 'CANCEL_WHILE_OUT_FOR_DELIVERY':
+      return `Cancellation after dispatch${suffix}`;
+    case 'SAFETY_POLICY':
+      return 'Call raised a restricted topic';
+    case 'BACKEND_FAILURE':
+      return `Order lookup failed${suffix}`;
+    default:
+      return `Escalated call${suffix}`;
+  }
+}
+
+function categoryFor(intent: string): TicketCategory {
+  switch (intent) {
+    case 'delivery_complaint':
+      return 'delivery';
+    case 'cancellation_request':
+      return 'cancellation';
+    case 'return_request':
+      return 'return';
+    case 'refund_request':
+      return 'refund';
+    case 'address_change':
+      return 'address';
+    default:
+      return 'general';
+  }
+}
+
+/** Short label for the live console, so an operator can see where the call is. */
+function describeStep(result: TurnResult): string {
+  const v = result.state.verification;
+  if (result.escalated) return 'Handing over to a human';
+  if (!v.orderId) return 'Waiting for an order number';
+  if (v.lookupOutcome === 'not_found') return 'Order number not recognised';
+  if (v.nameMatches === false) return 'Name does not match the order';
+  if (!v.confirmed) return 'Confirming order details with the caller';
+  return 'Working the request';
+}
+
+export async function endCall(callId: string): Promise<CallRow | null> {
+  const db = await getDatabase(config.DATABASE_URL);
+  const call = await db.calls.findById(callId);
+  if (!call) return null;
+  const ended = await db.calls.end(callId, call.escalated ? 'human' : 'ai');
+
+  agoraService.publishSignalling(callId, 'call_ended', {
+    callId,
+    durationSeconds: ended?.durationSeconds ?? null,
+    escalated: call.escalated,
+  });
+
+  return ended;
+}

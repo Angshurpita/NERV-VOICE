@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "types": ["node"],
+    "paths": {
+      "@echosphere/core": ["../../packages/core/src/index.ts"],
+      "@echosphere/core/*": ["../../packages/core/src/*"],
+      "@echosphere/db": ["../../packages/db/src/index.ts"],
+      "@echosphere/db/*": ["../../packages/db/src/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "api/**/*.ts"]
+}
