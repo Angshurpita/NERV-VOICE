@@ -133,6 +133,26 @@ agoraRouter.get("/status", (_req, res) => {
 });
 
 /**
+ * Agora CustomLLM Health Check endpoint.
+ * Usable through public URL to verify that Agora can reach the backend.
+ * Never exposes secrets or credentials.
+ */
+const customLlmHealthHandler = (_req: any, res: any) => {
+  res.json({
+    ok: true,
+    service: "agora-custom-llm",
+    endpoint: "/api/agora/openai/v1/chat/completions",
+    sttProvider: "deepgram",
+    ttsProvider: "deepgram_aura",
+    ttsModel: config.deepgram.ttsModel,
+    llmConfigured: Boolean(config.agora.llmUrl),
+  });
+};
+
+agoraRouter.get("/openai/health", customLlmHealthHandler);
+agoraRouter.get("/openai/v1/health", customLlmHealthHandler);
+
+/**
  * Authoritative Custom LLM endpoint for the real Agora Conversational AI Agent.
  *
  * Pipeline:
@@ -142,8 +162,18 @@ const chatCompletionHandler = async (req: any, res: any) => {
   try {
     const messages = Array.isArray(req.body?.messages) ? req.body.messages : [];
     const userMsg = [...messages].reverse().find((m: any) => m.role === "user");
-    const userUtterance =
-      typeof userMsg?.content === "string" ? userMsg.content.trim() : "";
+    let userUtterance = "";
+    if (typeof userMsg?.content === "string") {
+      userUtterance = userMsg.content.trim();
+    } else if (Array.isArray(userMsg?.content)) {
+      userUtterance = userMsg.content
+        .filter(
+          (p: any) => p?.type === "text" || typeof p?.text === "string",
+        )
+        .map((p: any) => p.text || p.content || "")
+        .join(" ")
+        .trim();
+    }
 
     let callId =
       (typeof req.query?.callId === "string" && req.query.callId) ||
@@ -179,7 +209,21 @@ const chatCompletionHandler = async (req: any, res: any) => {
       return;
     }
 
+    logVoiceDiagnostic("CUSTOM_LLM_REQUEST_RECEIVED", {
+      callId,
+      channelName,
+      stream: Boolean(req.body?.stream),
+      utterance: userUtterance,
+    });
+
     if (!userUtterance) {
+      const fallbackReply = "Hello, how can I help you today?";
+      logVoiceDiagnostic("CUSTOM_LLM_RESPONSE_SENT", {
+        callId,
+        channelName,
+        stream: false,
+        replyLength: fallbackReply.length,
+      });
       res.json({
         id: `chatcmpl-${Date.now()}`,
         object: "chat.completion",
@@ -190,7 +234,7 @@ const chatCompletionHandler = async (req: any, res: any) => {
             index: 0,
             message: {
               role: "assistant",
-              content: "Hello, how can I help you today?",
+              content: fallbackReply,
             },
             finish_reason: "stop",
           },
@@ -265,8 +309,22 @@ const chatCompletionHandler = async (req: any, res: any) => {
       );
       res.write("data: [DONE]\n\n");
       res.end();
+
+      logVoiceDiagnostic("CUSTOM_LLM_RESPONSE_SENT", {
+        callId,
+        channelName,
+        stream: true,
+        replyLength: reply.length,
+      });
       return;
     }
+
+    logVoiceDiagnostic("CUSTOM_LLM_RESPONSE_SENT", {
+      callId,
+      channelName,
+      stream: false,
+      replyLength: reply.length,
+    });
 
     res.json({
       id: `chatcmpl-${Date.now()}`,

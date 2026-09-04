@@ -159,4 +159,51 @@ describe("Agora Custom LLM OpenAI-Compatible Endpoint", () => {
     expect(text).toContain("data: ");
     expect(text).toContain("[DONE]");
   });
+
+  it("provides Agora CustomLLM health check at /api/agora/openai/health", async () => {
+    const res = await fetch(`${baseUrl}/api/agora/openai/health`);
+    expect(res.status).toBe(200);
+    const body: any = await res.json();
+    expect(body).toEqual({
+      ok: true,
+      service: "agora-custom-llm",
+      endpoint: "/api/agora/openai/v1/chat/completions",
+      sttProvider: "deepgram",
+      ttsProvider: "deepgram_aura",
+      ttsModel: expect.any(String),
+      llmConfigured: expect.any(Boolean),
+    });
+    // Ensure no secrets are leaked
+    expect(body).not.toHaveProperty("apiKey");
+    expect(body).not.toHaveProperty("appCertificate");
+    expect(body).not.toHaveProperty("customerSecret");
+  });
+
+  it("handles multi-part array user message content", async () => {
+    const call = await startCall({
+      language: "en",
+      channelName: `channel_multipart_${Date.now()}`,
+    });
+
+    const res = await fetch(
+      `${baseUrl}/api/agora/openai/v1/chat/completions?callId=${encodeURIComponent(call.callId)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [
+            {
+              role: "user",
+              content: [{ type: "text", text: "Where is my order 4852?" }],
+            },
+          ],
+        }),
+      },
+    );
+
+    expect(res.status).toBe(200);
+    const data: any = await res.json();
+    expect(data.object).toBe("chat.completion");
+    expect(data.choices[0].message.role).toBe("assistant");
+  });
 });

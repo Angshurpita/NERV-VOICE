@@ -9,7 +9,7 @@ import {
 } from "agora-agents";
 import type { LanguageCode } from "@echosphere/core";
 import { getDatabase } from "@echosphere/db";
-import { config } from "./config.js";
+import { config, isPrivateOrLocalhostUrl } from "./config.js";
 import { logVoiceDiagnostic } from "./diagnostics.js";
 
 export interface ManagedSession {
@@ -117,15 +117,17 @@ export class AgentWorker {
 
     // Determine the authoritative EchoSphere CustomLLM endpoint.
     // In production and real voice calls, Agora Cloud Agent calls back to this URL.
-    const baseLlmUrl =
-      config.agora.llmUrl ||
-      (config.PUBLIC_URL
-        ? `${config.PUBLIC_URL}/api/agora/openai/v1/chat/completions`
-        : "");
+    const baseLlmUrl = config.agora.llmUrl;
 
     if (!baseLlmUrl) {
       const err =
         "Cannot start Agora Conversational Agent: PUBLIC_URL or AGORA_LLM_URL must be configured so Agora can route recognized caller speech to EchoSphere CustomLLM endpoint.";
+      logVoiceDiagnostic("PIPELINE_ERROR", { callId, channelName, error: err });
+      return { ok: false, error: err };
+    }
+
+    if (config.IS_PRODUCTION && isPrivateOrLocalhostUrl(baseLlmUrl)) {
+      const err = `Cannot start Agora Conversational Agent: CustomLLM URL "${baseLlmUrl}" points to localhost or a private network which Agora cloud cannot reach in production. Configure a public HTTPS URL.`;
       logVoiceDiagnostic("PIPELINE_ERROR", { callId, channelName, error: err });
       return { ok: false, error: err };
     }
@@ -148,6 +150,12 @@ export class AgentWorker {
 
       // Configure authoritative CustomLLM URL passing deterministic callId & channel
       const targetLlmUrl = `${baseLlmUrl}${baseLlmUrl.includes("?") ? "&" : "?"}callId=${encodeURIComponent(callId)}&channel=${encodeURIComponent(channelName)}`;
+
+      logVoiceDiagnostic("CUSTOM_LLM_URL_RESOLVED", {
+        callId,
+        channelName,
+        targetLlmUrl,
+      });
 
       const agent = new Agent({
         client,

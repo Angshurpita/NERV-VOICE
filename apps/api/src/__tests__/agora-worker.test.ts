@@ -82,4 +82,37 @@ describe("Agora Worker & Voice Architecture", () => {
     expect(status).toHaveProperty("isShuttingDown");
     expect(typeof status.activeSessions).toBe("number");
   });
+
+  it("correctly resolves CustomLLM URL with trailing slash normalization", async () => {
+    const { resolveAgoraLlmUrl, isPrivateOrLocalhostUrl } = await import(
+      "../config.js"
+    );
+
+    // Explicit AGORA_LLM_URL takes highest priority
+    expect(
+      resolveAgoraLlmUrl("https://custom.endpoint.com/v1", "https://example.com"),
+    ).toBe("https://custom.endpoint.com/v1");
+
+    // PUBLIC_URL fallback appends endpoint and strips trailing slashes
+    expect(
+      resolveAgoraLlmUrl("", "https://example.com/"),
+    ).toBe("https://example.com/api/agora/openai/v1/chat/completions");
+
+    expect(
+      resolveAgoraLlmUrl("", "voice.example.com"),
+    ).toBe("https://voice.example.com/api/agora/openai/v1/chat/completions");
+
+    expect(resolveAgoraLlmUrl("", "")).toBe("");
+
+    // Private / localhost URL detection
+    expect(isPrivateOrLocalhostUrl("http://localhost:3001")).toBe(true);
+    expect(isPrivateOrLocalhostUrl("http://127.0.0.1:3001")).toBe(true);
+    expect(isPrivateOrLocalhostUrl("http://0.0.0.0:3001")).toBe(true);
+    expect(isPrivateOrLocalhostUrl("http://192.168.1.50:3001")).toBe(true);
+    expect(isPrivateOrLocalhostUrl("http://10.0.0.1:3001")).toBe(true);
+    expect(isPrivateOrLocalhostUrl("https://example.trycloudflare.com")).toBe(
+      false,
+    );
+    expect(isPrivateOrLocalhostUrl("https://api.yourdomain.com")).toBe(false);
+  });
 });

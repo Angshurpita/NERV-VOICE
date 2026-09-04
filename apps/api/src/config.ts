@@ -68,12 +68,83 @@ const CORS_ORIGINS = str(
   .map((o) => o.trim())
   .filter(Boolean);
 
-const PUBLIC_URL = str("PUBLIC_URL") || str("VERCEL_URL") || str("BACKEND_URL");
-const formattedPublicUrl = PUBLIC_URL
-  ? PUBLIC_URL.startsWith("http")
-    ? PUBLIC_URL.replace(/\/$/, "")
-    : `https://${PUBLIC_URL.replace(/\/$/, "")}`
+const RAW_PUBLIC_URL =
+  str("PUBLIC_URL") || str("VERCEL_URL") || str("BACKEND_URL");
+const RAW_AGORA_LLM_URL = str("AGORA_LLM_URL");
+
+/**
+ * Resolves the authoritative CustomLLM endpoint URL for Agora Conversational AI Agent.
+ *
+ * Expected behavior:
+ * - If AGORA_LLM_URL exists: use it exactly as supplied.
+ * - If AGORA_LLM_URL does not exist but PUBLIC_URL exists:
+ *   construct `${PUBLIC_URL}/api/agora/openai/v1/chat/completions`
+ *   Normalizing trailing slashes so this does not produce `//api/agora/...`
+ */
+export function resolveAgoraLlmUrl(
+  rawLlmUrl?: string,
+  rawPublicUrl?: string,
+): string {
+  const llmUrl = rawLlmUrl?.trim();
+  if (llmUrl) {
+    return llmUrl;
+  }
+  const publicUrl = rawPublicUrl?.trim();
+  if (publicUrl) {
+    const stripped = publicUrl.replace(/\/+$/, "");
+    const normalized =
+      stripped.startsWith("http://") || stripped.startsWith("https://")
+        ? stripped
+        : `https://${stripped}`;
+    return `${normalized}/api/agora/openai/v1/chat/completions`;
+  }
+  return "";
+}
+
+/**
+ * Checks if a URL points to localhost, loopback, or private/internal networks
+ * that are unreachable from Agora's cloud service in production.
+ */
+export function isPrivateOrLocalhostUrl(urlString: string): boolean {
+  if (!urlString) return false;
+  try {
+    const parsed = new URL(urlString);
+    const host = parsed.hostname.toLowerCase();
+    if (
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "0.0.0.0" ||
+      host === "::1" ||
+      host.endsWith(".local") ||
+      host.endsWith(".internal")
+    ) {
+      return true;
+    }
+    const parts = host.split(".").map(Number);
+    if (
+      parts.length === 4 &&
+      parts.every((p) => !isNaN(p) && p >= 0 && p <= 255)
+    ) {
+      if (parts[0] === 10) return true;
+      if (parts[0] === 127) return true;
+      if (parts[0] === 0) return true;
+      if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+      if (parts[0] === 192 && parts[1] === 168) return true;
+      if (parts[0] === 169 && parts[1] === 254) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+const formattedPublicUrl = RAW_PUBLIC_URL
+  ? RAW_PUBLIC_URL.startsWith("http")
+    ? RAW_PUBLIC_URL.replace(/\/+$/, "")
+    : `https://${RAW_PUBLIC_URL.replace(/\/+$/, "")}`
   : "";
+
+const resolvedLlmUrl = resolveAgoraLlmUrl(RAW_AGORA_LLM_URL, RAW_PUBLIC_URL);
 
 export const config = {
   NODE_ENV,
@@ -87,7 +158,7 @@ export const config = {
 
   gemini: {
     apiKey: str("GEMINI_API_KEY"),
-    model: str("GEMINI_MODEL", "gemini-2.5-flash"),
+    model: str("GEMINI_MODEL", "gemini-3.8-flash"),
     enabled: Boolean(str("GEMINI_API_KEY")),
   },
 
@@ -117,11 +188,7 @@ export const config = {
       str("AGORA_CUSTOMER_ID") &&
       str("AGORA_CUSTOMER_SECRET"),
     ),
-    llmUrl:
-      str("AGORA_LLM_URL") ||
-      (formattedPublicUrl
-        ? `${formattedPublicUrl}/api/agora/openai/v1/chat/completions`
-        : ""),
+    llmUrl: resolvedLlmUrl,
   },
 
   /** Seed a first admin so a fresh install is usable. Disable in production. */
@@ -134,14 +201,17 @@ export const config = {
 } as const;
 
 // Production requirement: fail loudly if Agora Cloud Agent is enabled without a public CustomLLM endpoint
-if (
-  config.IS_PRODUCTION &&
-  config.agora.cloudAgentEnabled &&
-  !config.agora.llmUrl
-) {
-  throw new Error(
-    "CRITICAL CONFIGURATION ERROR: PUBLIC_URL or AGORA_LLM_URL must be configured in production for Agora Conversational AI Agent CustomLLM callbacks. Agora servers cannot reach localhost.",
-  );
+if (config.IS_PRODUCTION && config.agora.cloudAgentEnabled) {
+  if (!config.agora.llmUrl) {
+    throw new Error(
+      "CRITICAL CONFIGURATION ERROR: PUBLIC_URL or AGORA_LLM_URL must be configured in production for Agora Conversational AI Agent CustomLLM callbacks. Agora servers cannot reach an unconfigured endpoint.",
+    );
+  }
+  if (isPrivateOrLocalhostUrl(config.agora.llmUrl)) {
+    throw new Error(
+      `CRITICAL CONFIGURATION ERROR: Agora CustomLLM URL "${config.agora.llmUrl}" points to localhost or a private IP. Agora cloud service cannot reach private/local addresses in production. Configure a public HTTPS URL (e.g. via Cloudflare tunnel, ngrok, or production domain).`,
+    );
+  }
 }
 
 export const policy: PolicyConfig = withPolicy({

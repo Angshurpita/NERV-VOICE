@@ -293,18 +293,7 @@ export default function App() {
         },
       );
 
-      // 4. Join Agora RTC channel and publish genuine microphone audio
-      // This will throw if microphone permission is denied or device fails.
-      await agoraCallManager.join({
-        appId: agora.appId,
-        channelName: agora.channelName,
-        uid: agora.uid,
-        rtcToken: agora.rtcToken,
-        rtmToken: agora.rtmToken,
-      });
-      setAgoraConnected(true);
-
-      // 5. Start real Agora Conversational AI Agent in the channel
+      // 4. Start real Agora Conversational AI Agent in the channel
       const agentRes = await api.startCloudAgent(
         agora.channelName,
         call.language,
@@ -320,6 +309,17 @@ export default function App() {
         );
       }
       setAgentActive(true);
+
+      // 5. Join Agora RTC channel and publish genuine microphone audio
+      // This will throw if microphone permission is denied or device fails.
+      await agoraCallManager.join({
+        appId: agora.appId,
+        channelName: agora.channelName,
+        uid: agora.uid,
+        rtcToken: agora.rtcToken,
+        rtmToken: agora.rtmToken,
+      });
+      setAgoraConnected(true);
 
       // 6. Ready for natural spoken voice conversation!
       setPhase("listening");
