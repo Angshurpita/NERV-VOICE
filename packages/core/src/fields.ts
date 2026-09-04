@@ -1,4 +1,9 @@
-import type { FieldDefinition, FieldKey, IntentKey, Priority } from './types.js';
+import type {
+  FieldDefinition,
+  FieldKey,
+  IntentKey,
+  Priority,
+} from "./types.js";
 
 /**
  * Field registry and per-intent requirements.
@@ -13,47 +18,47 @@ import type { FieldDefinition, FieldKey, IntentKey, Priority } from './types.js'
 
 export const FIELD_DEFINITIONS: Record<FieldKey, FieldDefinition> = {
   orderId: {
-    key: 'orderId',
-    priority: 'P0',
+    key: "orderId",
+    priority: "P0",
     critical: true,
     questionIntent:
-      'Ask the caller for their order number. It is mandatory — nothing can be checked without it.',
+      "Ask the caller for their order number. It is mandatory — nothing can be checked without it.",
   },
   customerIdentity: {
-    key: 'customerIdentity',
-    priority: 'P0',
+    key: "customerIdentity",
+    priority: "P0",
     critical: true,
-    questionIntent: 'Ask for the name the order was placed under.',
+    questionIntent: "Ask for the name the order was placed under.",
   },
   problem: {
-    key: 'problem',
-    priority: 'P1',
+    key: "problem",
+    priority: "P1",
     critical: false,
-    questionIntent: 'Ask the caller to describe what has gone wrong.',
+    questionIntent: "Ask the caller to describe what has gone wrong.",
   },
   cancellationReason: {
-    key: 'cancellationReason',
-    priority: 'P1',
+    key: "cancellationReason",
+    priority: "P1",
     critical: false,
-    questionIntent: 'Ask why the caller wants to cancel.',
+    questionIntent: "Ask why the caller wants to cancel.",
   },
   returnReason: {
-    key: 'returnReason',
-    priority: 'P1',
+    key: "returnReason",
+    priority: "P1",
     critical: false,
-    questionIntent: 'Ask what is wrong with the item they want to return.',
+    questionIntent: "Ask what is wrong with the item they want to return.",
   },
   refundReason: {
-    key: 'refundReason',
-    priority: 'P1',
+    key: "refundReason",
+    priority: "P1",
     critical: false,
-    questionIntent: 'Ask why they are asking for a refund.',
+    questionIntent: "Ask why they are asking for a refund.",
   },
   additionalContext: {
-    key: 'additionalContext',
-    priority: 'P2',
+    key: "additionalContext",
+    priority: "P2",
     critical: false,
-    questionIntent: 'Ask whether there is anything else worth knowing.',
+    questionIntent: "Ask whether there is anything else worth knowing.",
   },
 };
 
@@ -65,32 +70,32 @@ export const FIELD_DEFINITIONS: Record<FieldKey, FieldDefinition> = {
  * ("what is your return policy?").
  */
 export const INTENT_REQUIREMENTS: Record<IntentKey, readonly FieldKey[]> = {
-  order_status: ['orderId', 'customerIdentity'],
-  delivery_complaint: ['orderId', 'customerIdentity', 'problem'],
-  cancellation_request: ['orderId', 'customerIdentity', 'cancellationReason'],
-  return_request: ['orderId', 'customerIdentity', 'returnReason'],
-  refund_request: ['orderId', 'customerIdentity', 'refundReason'],
-  address_change: ['orderId', 'customerIdentity'],
-  general_query: ['problem'],
+  order_status: ["orderId", "customerIdentity"],
+  delivery_complaint: ["orderId", "customerIdentity", "problem"],
+  cancellation_request: ["orderId", "customerIdentity", "cancellationReason"],
+  return_request: ["orderId", "customerIdentity", "returnReason"],
+  refund_request: ["orderId", "customerIdentity", "refundReason"],
+  address_change: ["orderId", "customerIdentity"],
+  general_query: ["problem"],
   /** Nothing is demanded until the intent is actually known. */
-  unknown: ['problem'],
+  unknown: ["problem"],
 };
 
 /** Intents that concern a specific order, and so cannot bypass verification. */
 const ORDER_SCOPED: ReadonlySet<IntentKey> = new Set<IntentKey>([
-  'order_status',
-  'delivery_complaint',
-  'cancellation_request',
-  'return_request',
-  'refund_request',
-  'address_change',
+  "order_status",
+  "delivery_complaint",
+  "cancellation_request",
+  "return_request",
+  "refund_request",
+  "address_change",
 ]);
 
 export function isOrderScoped(intent: IntentKey): boolean {
   return ORDER_SCOPED.has(intent);
 }
 
-const PRIORITY_ORDER: readonly Priority[] = ['P0', 'P1', 'P2'];
+const PRIORITY_ORDER: readonly Priority[] = ["P0", "P1", "P2"];
 
 export function priorityRank(priority: Priority): number {
   return PRIORITY_ORDER.indexOf(priority);
@@ -108,7 +113,8 @@ export function orderedRequiredFields(intent: IntentKey): readonly FieldKey[] {
   const declared = requiredFieldsFor(intent);
   return [...declared].sort((a, b) => {
     const byPriority =
-      priorityRank(FIELD_DEFINITIONS[a].priority) - priorityRank(FIELD_DEFINITIONS[b].priority);
+      priorityRank(FIELD_DEFINITIONS[a].priority) -
+      priorityRank(FIELD_DEFINITIONS[b].priority);
     if (byPriority !== 0) return byPriority;
     return declared.indexOf(a) - declared.indexOf(b);
   });
@@ -121,14 +127,14 @@ export function isCritical(field: FieldKey): boolean {
 /** The reason field matching an intent, used when building a handover report. */
 export function reasonFieldFor(intent: IntentKey): FieldKey | null {
   switch (intent) {
-    case 'cancellation_request':
-      return 'cancellationReason';
-    case 'return_request':
-      return 'returnReason';
-    case 'refund_request':
-      return 'refundReason';
-    case 'delivery_complaint':
-      return 'problem';
+    case "cancellation_request":
+      return "cancellationReason";
+    case "return_request":
+      return "returnReason";
+    case "refund_request":
+      return "refundReason";
+    case "delivery_complaint":
+      return "problem";
     default:
       return null;
   }

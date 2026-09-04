@@ -1,9 +1,14 @@
-import bcrypt from 'bcryptjs';
-import crypto from 'node:crypto';
-import jwt from 'jsonwebtoken';
-import type { NextFunction, Request, Response } from 'express';
-import { getDatabase, toPublicUser, type PublicUser, type UserRole } from '@echosphere/db';
-import { config } from './config.js';
+import bcrypt from "bcryptjs";
+import crypto from "node:crypto";
+import jwt from "jsonwebtoken";
+import type { NextFunction, Request, Response } from "express";
+import {
+  getDatabase,
+  toPublicUser,
+  type PublicUser,
+  type UserRole,
+} from "@echosphere/db";
+import { config } from "./config.js";
 
 /**
  * Authentication — requirement 11.
@@ -14,8 +19,13 @@ import { config } from './config.js';
  * cookie, and a `sessions` row per login so a session can actually be revoked.
  */
 
-const COOKIE_NAME = 'echosphere_session';
-const ROLE_RANK: Record<UserRole, number> = { customer: 0, agent: 1, supervisor: 2, admin: 3 };
+const COOKIE_NAME = "echosphere_session";
+const ROLE_RANK: Record<UserRole, number> = {
+  customer: 0,
+  agent: 1,
+  supervisor: 2,
+  admin: 3,
+};
 
 export interface AuthedRequest extends Request {
   user?: PublicUser;
@@ -28,7 +38,10 @@ export async function hashPassword(plain: string): Promise<string> {
   return bcrypt.hash(plain, 11);
 }
 
-export async function verifyPassword(plain: string, hash: string): Promise<boolean> {
+export async function verifyPassword(
+  plain: string,
+  hash: string,
+): Promise<boolean> {
   try {
     return await bcrypt.compare(plain, hash);
   } catch {
@@ -39,9 +52,10 @@ export async function verifyPassword(plain: string, hash: string): Promise<boole
 /** Minimum viable password policy, enforced server-side. */
 export function passwordProblems(password: string): string[] {
   const problems: string[] = [];
-  if (password.length < 8) problems.push('at least 8 characters');
-  if (!/[a-z]/.test(password)) problems.push('a lowercase letter');
-  if (!/[A-Z0-9]/.test(password)) problems.push('an uppercase letter or a digit');
+  if (password.length < 8) problems.push("at least 8 characters");
+  if (!/[a-z]/.test(password)) problems.push("a lowercase letter");
+  if (!/[A-Z0-9]/.test(password))
+    problems.push("an uppercase letter or a digit");
   return problems;
 }
 
@@ -56,13 +70,15 @@ interface TokenPayload {
 function signToken(payload: TokenPayload): string {
   return jwt.sign(payload, config.AUTH_SECRET, {
     expiresIn: `${config.SESSION_TTL_DAYS}d`,
-    issuer: 'echosphere',
+    issuer: "echosphere",
   });
 }
 
 function verifyToken(token: string): TokenPayload | null {
   try {
-    return jwt.verify(token, config.AUTH_SECRET, { issuer: 'echosphere' }) as TokenPayload;
+    return jwt.verify(token, config.AUTH_SECRET, {
+      issuer: "echosphere",
+    }) as TokenPayload;
   } catch {
     return null;
   }
@@ -73,7 +89,7 @@ function verifyToken(token: string): TokenPayload | null {
  * database cannot be replayed as a set of valid cookies.
  */
 function hashToken(token: string): string {
-  return crypto.createHash('sha256').update(token).digest('hex');
+  return crypto.createHash("sha256").update(token).digest("hex");
 }
 
 // ── Cookie ────────────────────────────────────────────────────────────────────
@@ -86,16 +102,16 @@ function hashToken(token: string): string {
 function cookieOptions(): {
   httpOnly: true;
   secure: boolean;
-  sameSite: 'none' | 'lax';
+  sameSite: "none" | "lax";
   maxAge: number;
   path: string;
 } {
   return {
     httpOnly: true,
     secure: config.IS_PRODUCTION,
-    sameSite: config.IS_PRODUCTION ? 'none' : 'lax',
+    sameSite: config.IS_PRODUCTION ? "none" : "lax",
     maxAge: config.SESSION_TTL_DAYS * 86_400_000,
-    path: '/',
+    path: "/",
   };
 }
 
@@ -125,17 +141,22 @@ export async function startSession(
 }
 
 export function clearSessionCookie(res: Response): void {
-  res.clearCookie(COOKIE_NAME, { ...cookieOptions(), maxAge: undefined as unknown as number });
+  res.clearCookie(COOKIE_NAME, {
+    ...cookieOptions(),
+    maxAge: undefined as unknown as number,
+  });
 }
 
 function extractToken(req: Request): string | null {
-  const fromCookie = (req.cookies as Record<string, string> | undefined)?.[COOKIE_NAME];
+  const fromCookie = (req.cookies as Record<string, string> | undefined)?.[
+    COOKIE_NAME
+  ];
   if (fromCookie) return fromCookie;
 
   // Bearer is accepted as a fallback: Safari and some in-app browsers block
   // third-party cookies outright, which would otherwise break the caller app.
   const header = req.headers.authorization;
-  if (header?.startsWith('Bearer ')) return header.slice(7);
+  if (header?.startsWith("Bearer ")) return header.slice(7);
   return null;
 }
 
@@ -166,9 +187,13 @@ export async function attachUser(
   next();
 }
 
-export function requireAuth(req: AuthedRequest, res: Response, next: NextFunction): void {
+export function requireAuth(
+  req: AuthedRequest,
+  res: Response,
+  next: NextFunction,
+): void {
   if (!req.user) {
-    res.status(401).json({ error: 'Sign in to continue.' });
+    res.status(401).json({ error: "Sign in to continue." });
     return;
   }
   next();
@@ -183,11 +208,11 @@ export function requireAuth(req: AuthedRequest, res: Response, next: NextFunctio
 export function requireRole(minimum: UserRole) {
   return (req: AuthedRequest, res: Response, next: NextFunction): void => {
     if (!req.user) {
-      res.status(401).json({ error: 'Sign in to continue.' });
+      res.status(401).json({ error: "Sign in to continue." });
       return;
     }
     if (ROLE_RANK[req.user.role] < ROLE_RANK[minimum]) {
-      res.status(403).json({ error: 'You do not have access to this.' });
+      res.status(403).json({ error: "You do not have access to this." });
       return;
     }
     next();
@@ -203,7 +228,10 @@ export { COOKIE_NAME, hashToken, ROLE_RANK };
  * self-serve signup granting admin is worse. Logged loudly, and off in
  * production.
  */
-export async function ensureSeedAdmin(): Promise<{ email: string; password: string } | null> {
+export async function ensureSeedAdmin(): Promise<{
+  email: string;
+  password: string;
+} | null> {
   if (!config.seedAdmin.enabled) return null;
 
   const db = await getDatabase(config.DATABASE_URL);
@@ -211,7 +239,9 @@ export async function ensureSeedAdmin(): Promise<{ email: string; password: stri
 
   const problems = passwordProblems(config.seedAdmin.password);
   if (problems.length > 0) {
-    console.warn(`[auth] SEED_ADMIN_PASSWORD is too weak (needs ${problems.join(', ')}); skipping.`);
+    console.warn(
+      `[auth] SEED_ADMIN_PASSWORD is too weak (needs ${problems.join(", ")}); skipping.`,
+    );
     return null;
   }
 
@@ -219,7 +249,7 @@ export async function ensureSeedAdmin(): Promise<{ email: string; password: stri
     email: config.seedAdmin.email,
     passwordHash: await hashPassword(config.seedAdmin.password),
     fullName: config.seedAdmin.name,
-    role: 'admin',
+    role: "admin",
   });
 
   return { email: config.seedAdmin.email, password: config.seedAdmin.password };

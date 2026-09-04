@@ -116,9 +116,7 @@ function LoginPage() {
             className="mb-3.5 size-11 rounded-xl object-contain"
           />
           <h1 className="font-display text-[22px] font-bold tracking-tight">
-            {mode === "signin"
-              ? "Sign in to Nerv"
-              : "Create your account"}
+            {mode === "signin" ? "Sign in to Nerv" : "Create your account"}
           </h1>
           <p className="mt-1 text-[13px] text-muted-foreground">
             {mode === "signin"

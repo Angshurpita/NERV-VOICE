@@ -1,7 +1,7 @@
-import { GoogleGenAI } from '@google/genai';
-import type { ModelTurnOutput } from '@echosphere/core';
-import { TURN_RESPONSE_SCHEMA } from '@echosphere/core';
-import { config } from './config.js';
+import { GoogleGenAI } from "@google/genai";
+import type { ModelTurnOutput } from "@echosphere/core";
+import { TURN_RESPONSE_SCHEMA } from "@echosphere/core";
+import { config } from "./config.js";
 
 /**
  * Gemini client using official `@google/genai` SDK.
@@ -22,8 +22,8 @@ function extractJson(raw: string): any {
   try {
     return JSON.parse(trimmed);
   } catch {
-    const firstBrace = trimmed.indexOf('{');
-    const lastBrace = trimmed.lastIndexOf('}');
+    const firstBrace = trimmed.indexOf("{");
+    const lastBrace = trimmed.lastIndexOf("}");
     if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
       return JSON.parse(trimmed.slice(firstBrace, lastBrace + 1));
     }
@@ -35,15 +35,25 @@ class GeminiClient implements ModelClient {
   private ai: GoogleGenAI;
   private readonly modelsToTry: string[];
 
-  constructor(apiKey: string, private readonly modelId: string) {
+  constructor(
+    apiKey: string,
+    private readonly modelId: string,
+  ) {
     this.ai = new GoogleGenAI({ apiKey });
-    const fallbacks = ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3-flash-preview', 'gemini-flash-latest'];
+    const fallbacks = [
+      "gemini-2.5-flash",
+      "gemini-2.0-flash",
+      "gemini-1.5-flash",
+    ];
     this.modelsToTry = [modelId, ...fallbacks.filter((m) => m !== modelId)];
   }
 
   readonly available = true;
 
-  async generate(input: { system: string; prompt: string }): Promise<ModelTurnOutput> {
+  async generate(input: {
+    system: string;
+    prompt: string;
+  }): Promise<ModelTurnOutput> {
     let lastError: unknown = null;
 
     for (const m of this.modelsToTry) {
@@ -53,7 +63,7 @@ class GeminiClient implements ModelClient {
           contents: input.prompt,
           config: {
             systemInstruction: input.system,
-            responseMimeType: 'application/json',
+            responseMimeType: "application/json",
             temperature: 0.6,
             maxOutputTokens: 2048,
           },
@@ -61,8 +71,10 @@ class GeminiClient implements ModelClient {
 
         const rawText =
           response.text ??
-          (response as any).candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('') ??
-          '';
+          (response as any).candidates?.[0]?.content?.parts
+            ?.map((p: any) => p.text)
+            .join("") ??
+          "";
         const parsed = extractJson(rawText) as ModelTurnOutput;
         const reply =
           parsed.reply ||
@@ -70,19 +82,21 @@ class GeminiClient implements ModelClient {
           (parsed as any).text ||
           (parsed as any).message ||
           (parsed as any).content ||
-          '';
+          "";
 
-        if (typeof reply !== 'string' || reply.trim().length === 0) {
+        if (typeof reply !== "string" || reply.trim().length === 0) {
           throw new Error(`Empty reply in JSON: ${rawText.slice(0, 100)}`);
         }
         return { ...parsed, reply: reply.trim() };
       } catch (err: any) {
         lastError = err;
-        console.warn(`[gemini/@google/genai] Model ${m} failed (${err?.message?.slice(0, 100)}), trying fallback...`);
+        console.warn(
+          `[gemini/@google/genai] Model ${m} failed (${err?.message?.slice(0, 100)}), trying fallback...`,
+        );
       }
     }
 
-    throw lastError ?? new Error('All Gemini model candidates failed');
+    throw lastError ?? new Error("All Gemini model candidates failed");
   }
 
   async summarise(transcript: string): Promise<string> {
@@ -91,16 +105,16 @@ class GeminiClient implements ModelClient {
         const response = await this.ai.models.generateContent({
           model: m,
           contents:
-            'Summarise this customer support call for the human agent taking it over. ' +
-            'Three sentences maximum, plain prose, no bullet points. State what the caller wants, ' +
+            "Summarise this customer support call for the human agent taking it over. " +
+            "Three sentences maximum, plain prose, no bullet points. State what the caller wants, " +
             `what has been verified, and what is unresolved.\n\n${transcript}`,
         });
-        return response.text?.trim() ?? 'Summary unavailable.';
+        return response.text?.trim() ?? "Summary unavailable.";
       } catch {
         continue;
       }
     }
-    return 'Summary unavailable — language model could not summarise.';
+    return "Summary unavailable — language model could not summarise.";
   }
 }
 
@@ -116,11 +130,11 @@ class UnavailableModel implements ModelClient {
   readonly available = false;
 
   async generate(): Promise<ModelTurnOutput> {
-    throw new Error('No language model configured');
+    throw new Error("No language model configured");
   }
 
   async summarise(): Promise<string> {
-    return 'Summary unavailable — no language model configured.';
+    return "Summary unavailable — no language model configured.";
   }
 }
 

@@ -1,4 +1,4 @@
-import { bootstrap, createApp } from '../src/app.js';
+import { bootstrap, createApp } from "../src/app.js";
 
 /**
  * Vercel serverless entry.

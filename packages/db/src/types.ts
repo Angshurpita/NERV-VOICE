@@ -12,7 +12,7 @@ import type {
   IntentKey,
   LanguageCode,
   VerificationReport,
-} from '@echosphere/core';
+} from "@echosphere/core";
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
@@ -23,7 +23,7 @@ import type {
  * never reach the staff dashboard, which is enforced in the API middleware
  * rather than by hiding nav links.
  */
-export type UserRole = 'customer' | 'agent' | 'supervisor' | 'admin';
+export type UserRole = "customer" | "agent" | "supervisor" | "admin";
 
 export interface UserRow {
   id: string;
@@ -36,8 +36,8 @@ export interface UserRow {
   /** Tailwind-ish token for the avatar, chosen at signup. */
   avatarColor: string;
   locale: LanguageCode;
-  theme: 'light' | 'dark' | 'system';
-  density: 'comfortable' | 'compact';
+  theme: "light" | "dark" | "system";
+  density: "comfortable" | "compact";
   notifyEscalations: boolean;
   notifyDigest: boolean;
   isActive: boolean;
@@ -46,7 +46,7 @@ export interface UserRow {
 }
 
 /** What the client is allowed to see. */
-export type PublicUser = Omit<UserRow, 'passwordHash'>;
+export type PublicUser = Omit<UserRow, "passwordHash">;
 
 export interface SessionRow {
   id: string;
@@ -63,8 +63,8 @@ export interface SessionRow {
 
 // ── Calls ─────────────────────────────────────────────────────────────────────
 
-export type CallStatus = 'active' | 'completed' | 'escalated' | 'abandoned';
-export type ResolvedBy = 'ai' | 'human' | null;
+export type CallStatus = "active" | "completed" | "escalated" | "abandoned";
+export type ResolvedBy = "ai" | "human" | null;
 
 export interface CallRow {
   id: string;
@@ -98,7 +98,7 @@ export interface TranscriptRow {
   id: string;
   callId: string;
   seq: number;
-  speaker: 'caller' | 'agent' | 'system' | 'human';
+  speaker: "caller" | "agent" | "system" | "human";
   text: string;
   language: LanguageCode;
   confidence: number;
@@ -107,15 +107,11 @@ export interface TranscriptRow {
 
 // ── Tickets ───────────────────────────────────────────────────────────────────
 
-export type TicketStatus = 'open' | 'in_progress' | 'waiting_customer' | 'resolved' | 'closed';
-export type TicketPriority = 'low' | 'medium' | 'high' | 'urgent';
+export type TicketStatus =
+  "open" | "in_progress" | "waiting_customer" | "resolved" | "closed";
+export type TicketPriority = "low" | "medium" | "high" | "urgent";
 export type TicketCategory =
-  | 'delivery'
-  | 'cancellation'
-  | 'return'
-  | 'refund'
-  | 'address'
-  | 'general';
+  "delivery" | "cancellation" | "return" | "refund" | "address" | "general";
 
 export interface TicketRow {
   id: string;
@@ -140,14 +136,14 @@ export interface TicketRow {
 }
 
 export type TicketEventKind =
-  | 'created'
-  | 'status_changed'
-  | 'priority_changed'
-  | 'assigned'
-  | 'note'
-  | 'resolved'
-  | 'reopened'
-  | 'escalated';
+  | "created"
+  | "status_changed"
+  | "priority_changed"
+  | "assigned"
+  | "note"
+  | "resolved"
+  | "reopened"
+  | "escalated";
 
 /**
  * Append-only ticket history.
@@ -169,7 +165,7 @@ export interface TicketEventRow {
 
 // ── Escalations ───────────────────────────────────────────────────────────────
 
-export type EscalationStatus = 'pending' | 'accepted' | 'resolved';
+export type EscalationStatus = "pending" | "accepted" | "resolved";
 
 export interface EscalationRow {
   id: string;
@@ -225,13 +221,13 @@ export interface Breakdown {
 // ── Table registry ────────────────────────────────────────────────────────────
 
 export const TABLES = {
-  users: 'users',
-  sessions: 'sessions',
-  calls: 'calls',
-  transcripts: 'transcripts',
-  tickets: 'tickets',
-  ticketEvents: 'ticket_events',
-  escalations: 'escalations',
+  users: "users",
+  sessions: "sessions",
+  calls: "calls",
+  transcripts: "transcripts",
+  tickets: "tickets",
+  ticketEvents: "ticket_events",
+  escalations: "escalations",
 } as const;
 
 export type TableName = (typeof TABLES)[keyof typeof TABLES];

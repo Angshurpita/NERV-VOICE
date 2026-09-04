@@ -1,4 +1,4 @@
-import type { FieldKey } from './types.js';
+import type { FieldKey } from "./types.js";
 
 /**
  * Deterministic tuning values.
@@ -47,7 +47,9 @@ export const DEFAULT_POLICY: PolicyConfig = {
   highValueInr: 25000,
 };
 
-export function withPolicy(overrides: Partial<PolicyConfig> = {}): PolicyConfig {
+export function withPolicy(
+  overrides: Partial<PolicyConfig> = {},
+): PolicyConfig {
   const merged = { ...DEFAULT_POLICY, ...overrides };
   assertPolicyValid(merged);
   return merged;
@@ -55,20 +57,24 @@ export function withPolicy(overrides: Partial<PolicyConfig> = {}): PolicyConfig 
 
 export function assertPolicyValid(policy: PolicyConfig): void {
   if (policy.medium >= policy.high) {
-    throw new Error(`medium confidence (${policy.medium}) must be below high (${policy.high})`);
+    throw new Error(
+      `medium confidence (${policy.medium}) must be below high (${policy.high})`,
+    );
   }
   const weightSum = policy.intentWeight + policy.fieldsWeight;
   if (Math.abs(weightSum - 1) > 1e-9) {
-    throw new Error(`intentWeight + fieldsWeight must sum to 1, got ${weightSum}`);
+    throw new Error(
+      `intentWeight + fieldsWeight must sum to 1, got ${weightSum}`,
+    );
   }
   if (policy.humanRequestsBeforeHandover < 1) {
-    throw new Error('humanRequestsBeforeHandover must be at least 1');
+    throw new Error("humanRequestsBeforeHandover must be at least 1");
   }
 }
 
 /** Per-field confirmation thresholds, resolved against the active policy. */
 export function thresholdFor(field: FieldKey, policy: PolicyConfig): number {
-  if (field === 'orderId') return policy.orderIdConfirmation;
-  if (field === 'customerIdentity') return policy.identityConfirmation;
+  if (field === "orderId") return policy.orderIdConfirmation;
+  if (field === "customerIdentity") return policy.identityConfirmation;
   return policy.high;
 }

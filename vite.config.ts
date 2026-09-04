@@ -23,7 +23,10 @@ export default defineConfig({
         // The dashboard shares the speech-text normalisation and domain types
         // with the API and the caller app. Consumed from source so there is no
         // build step between the three.
-        "@echosphere/core": path.resolve(import.meta.dirname, "packages/core/src/index.ts"),
+        "@echosphere/core": path.resolve(
+          import.meta.dirname,
+          "packages/core/src/index.ts",
+        ),
       },
     },
     server: { port: 3000 },

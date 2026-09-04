@@ -1,5 +1,5 @@
-import type { PolicyConfig } from './config.js';
-import { combineAsrAndExtraction } from './confidence.js';
+import type { PolicyConfig } from "./config.js";
+import { combineAsrAndExtraction } from "./confidence.js";
 import {
   advanceTurn,
   applyConfirmation,
@@ -13,19 +13,23 @@ import {
   requestConfirmation,
   systemClock,
   type Clock,
-} from './conversation-state.js';
-import { applyEscalation, evaluateEscalation, type EscalationDecision } from './escalation.js';
-import { reasonFieldFor } from './fields.js';
-import { evaluateCancellation } from './order-policy.js';
-import { planRetention, type RetentionPlan } from './persuasion.js';
+} from "./conversation-state.js";
+import {
+  applyEscalation,
+  evaluateEscalation,
+  type EscalationDecision,
+} from "./escalation.js";
+import { reasonFieldFor } from "./fields.js";
+import { evaluateCancellation } from "./order-policy.js";
+import { planRetention, type RetentionPlan } from "./persuasion.js";
 import {
   buildTurnPrompt,
   composeInstruction,
   humanise,
   SYSTEM_PROMPT,
   type ModelTurnOutput,
-} from './prompt.js';
-import { classifyRequest, safeFallback, screenResponse } from './safety.js';
+} from "./prompt.js";
+import { classifyRequest, safeFallback, screenResponse } from "./safety.js";
 import {
   detectAgreement,
   detectHumanRequest,
@@ -34,7 +38,7 @@ import {
   extractOrderIdCandidates,
   extractPersonName,
   extractReason,
-} from './signals.js';
+} from "./signals.js";
 import {
   applyLookup,
   applyNameCheck,
@@ -42,7 +46,7 @@ import {
   describeOrder,
   markReadBack,
   planVerification,
-} from './verification.js';
+} from "./verification.js";
 import type {
   ConversationEvent,
   ConversationState,
@@ -50,7 +54,7 @@ import type {
   LanguageCode,
   Order,
   OrderLookupResult,
-} from './types.js';
+} from "./types.js";
 
 /**
  * The turn pipeline.
@@ -75,7 +79,10 @@ export interface TurnDeps {
   policy: PolicyConfig;
   lookupOrder(orderId: string): Promise<OrderLookupResult>;
   /** Draft a reply. Implementations must not mutate state. */
-  callModel(input: { system: string; prompt: string }): Promise<ModelTurnOutput>;
+  callModel(input: {
+    system: string;
+    prompt: string;
+  }): Promise<ModelTurnOutput>;
   /** Perform a cancellation the AI is permitted to make. */
   cancelOrder?(orderId: string): Promise<boolean>;
   clock?: Clock;
@@ -98,17 +105,25 @@ export interface TurnInput {
   utterance: string;
   /** ASR confidence for this utterance, 0..1. Defaults to 1 for typed input. */
   asrConfidence?: number;
-  history: Array<{ speaker: 'caller' | 'agent'; text: string }>;
+  history: Array<{ speaker: "caller" | "agent"; text: string }>;
 }
 
-export async function runTurn(input: TurnInput, deps: TurnDeps): Promise<TurnResult> {
+export async function runTurn(
+  input: TurnInput,
+  deps: TurnDeps,
+): Promise<TurnResult> {
   const clock = deps.clock ?? systemClock;
   const { policy } = deps;
   const asr = clamp01(input.asrConfidence ?? 1);
   const utterance = input.utterance.trim();
   const events: ConversationEvent[] = [];
-  const emit = (type: ConversationEvent['type'], payload: unknown) =>
-    events.push({ type, sessionId: input.state.sessionId, at: clock.now().toISOString(), payload });
+  const emit = (type: ConversationEvent["type"], payload: unknown) =>
+    events.push({
+      type,
+      sessionId: input.state.sessionId,
+      at: clock.now().toISOString(),
+      payload,
+    });
 
   let state = advanceTurn(input.state, clock);
 
@@ -117,16 +132,16 @@ export async function runTurn(input: TurnInput, deps: TurnDeps): Promise<TurnRes
   const language = detectLanguage(utterance, state.language.primary);
   if (language !== state.language.primary) {
     state = observeLanguage(state, language, clock);
-    emit('LANGUAGE_CHANGED', { to: language });
+    emit("LANGUAGE_CHANGED", { to: language });
   }
 
   const safety = classifyRequest(utterance);
-  if (!safety.allowed) emit('SAFETY_BLOCKED', { domain: safety.domain });
+  if (!safety.allowed) emit("SAFETY_BLOCKED", { domain: safety.domain });
 
   const humanSignal = detectHumanRequest(utterance);
   if (humanSignal.requested) {
     state = noteHumanRequest(state, humanSignal.refusesAiHelp, clock);
-    emit('RETENTION_ATTEMPTED', { count: state.humanRequestCount });
+    emit("RETENTION_ATTEMPTED", { count: state.humanRequestCount });
   }
 
   const hints = detectIntentHints(utterance);
@@ -140,8 +155,15 @@ export async function runTurn(input: TurnInput, deps: TurnDeps): Promise<TurnRes
   // Entities. Regex extraction runs first so a settled order id is available
   // this turn rather than next; the model's reading is folded in later.
   for (const candidate of extractOrderIdCandidates(utterance)) {
-    state = observeField(state, 'orderId', candidate, combineAsrAndExtraction(asr, 0.95), utterance, clock);
-    emit('ENTITY_DETECTED', { field: 'orderId', value: candidate });
+    state = observeField(
+      state,
+      "orderId",
+      candidate,
+      combineAsrAndExtraction(asr, 0.95),
+      utterance,
+      clock,
+    );
+    emit("ENTITY_DETECTED", { field: "orderId", value: candidate });
   }
 
   /**
@@ -159,21 +181,28 @@ export async function runTurn(input: TurnInput, deps: TurnDeps): Promise<TurnRes
   if (heardName) {
     state = observeField(
       state,
-      'customerIdentity',
+      "customerIdentity",
       heardName,
       combineAsrAndExtraction(asr, expectingName ? 0.92 : 0.85),
       utterance,
       clock,
     );
-    emit('ENTITY_DETECTED', { field: 'customerIdentity', value: heardName });
+    emit("ENTITY_DETECTED", { field: "customerIdentity", value: heardName });
   }
 
   const reasonField = reasonFieldFor(state.intent.value);
   if (reasonField && !state.requiredInformation[reasonField]?.confirmed) {
     const heardReason = extractReason(utterance);
     if (heardReason) {
-      state = observeField(state, reasonField, heardReason, combineAsrAndExtraction(asr, 0.9), utterance, clock);
-      emit('ENTITY_DETECTED', { field: reasonField, value: heardReason });
+      state = observeField(
+        state,
+        reasonField,
+        heardReason,
+        combineAsrAndExtraction(asr, 0.9),
+        utterance,
+        clock,
+      );
+      emit("ENTITY_DETECTED", { field: reasonField, value: heardReason });
     }
   }
 
@@ -184,10 +213,15 @@ export async function runTurn(input: TurnInput, deps: TurnDeps): Promise<TurnRes
   if (settledOrderId && !state.verification.lookedUp) {
     lookup = await deps.lookupOrder(settledOrderId);
     state = applyLookup(state, lookup, clock);
-    emit(lookup.outcome === 'found' ? 'ORDER_VERIFIED' : 'ORDER_VERIFICATION_FAILED', {
-      orderId: settledOrderId,
-      outcome: lookup.outcome,
-    });
+    emit(
+      lookup.outcome === "found"
+        ? "ORDER_VERIFIED"
+        : "ORDER_VERIFICATION_FAILED",
+      {
+        orderId: settledOrderId,
+        outcome: lookup.outcome,
+      },
+    );
   }
 
   /**
@@ -200,19 +234,28 @@ export async function runTurn(input: TurnInput, deps: TurnDeps): Promise<TurnRes
    * guarded on having an order. The lookup is served from the in-memory
    * catalogue, so re-reading it per turn costs nothing.
    */
-  let order: Order | null = lookup?.outcome === 'found' ? lookup.order : null;
-  if (!order && state.verification.lookupOutcome === 'found') {
+  let order: Order | null = lookup?.outcome === "found" ? lookup.order : null;
+  if (!order && state.verification.lookupOutcome === "found") {
     const orderId = state.verification.orderId ?? settledOrderId;
     if (orderId) {
       const again = await deps.lookupOrder(orderId);
-      if (again.outcome === 'found') order = again.order;
+      if (again.outcome === "found") order = again.order;
     }
   }
 
   // Name check, once both the order and a claimed name exist.
   const claimedName = state.requiredInformation.customerIdentity?.value;
-  if (claimedName && state.verification.ordererName && state.verification.nameMatches === null) {
-    state = applyNameCheck(state, claimedName, state.verification.ordererName, clock);
+  if (
+    claimedName &&
+    state.verification.ordererName &&
+    state.verification.nameMatches === null
+  ) {
+    state = applyNameCheck(
+      state,
+      claimedName,
+      state.verification.ordererName,
+      clock,
+    );
   }
 
   // ── 3. Policy ─────────────────────────────────────────────────────────────
@@ -220,9 +263,10 @@ export async function runTurn(input: TurnInput, deps: TurnDeps): Promise<TurnRes
   state = recomputeConfidence(state, policy, clock);
 
   let verification = planVerification(state, policy, order);
-  let retention: RetentionPlan | null = humanSignal.requested || state.humanRequestCount > 0
-    ? planRetention(state, policy, order)
-    : null;
+  let retention: RetentionPlan | null =
+    humanSignal.requested || state.humanRequestCount > 0
+      ? planRetention(state, policy, order)
+      : null;
 
   let decision = evaluateEscalation(
     state,
@@ -239,12 +283,12 @@ export async function runTurn(input: TurnInput, deps: TurnDeps): Promise<TurnRes
     const outcome = await attemptResolution(state, order, hints, deps, clock);
     state = outcome.state;
     resolution = outcome.instruction;
-    if (outcome.executed) emit('TOOL_EXECUTED', { action: outcome.executed });
+    if (outcome.executed) emit("TOOL_EXECUTED", { action: outcome.executed });
   }
 
   // Mark the read-back as delivered so the next turn awaits a yes/no rather
   // than reading the same details out again.
-  if (verification.step === 'READ_BACK_REQUIRED') {
+  if (verification.step === "READ_BACK_REQUIRED") {
     state = markReadBack(state, clock);
   }
 
@@ -257,10 +301,15 @@ export async function runTurn(input: TurnInput, deps: TurnDeps): Promise<TurnRes
    * a field instead of the order read-back it was meant for.
    */
   let question =
-    decision.required || !verification.canProceed ? null : nextQuestion(state, policy);
-  if (question?.kind === 'confirm' && state.pendingConfirmation !== question.field) {
+    decision.required || !verification.canProceed
+      ? null
+      : nextQuestion(state, policy);
+  if (
+    question?.kind === "confirm" &&
+    state.pendingConfirmation !== question.field
+  ) {
     state = requestConfirmation(state, question.field, clock);
-    emit('QUESTION_ASKED', { field: question.field, kind: question.kind });
+    emit("QUESTION_ASKED", { field: question.field, kind: question.kind });
   }
 
   // ── 4. One model call, for phrasing only ──────────────────────────────────
@@ -296,7 +345,15 @@ export async function runTurn(input: TurnInput, deps: TurnDeps): Promise<TurnRes
   // ── 5. Fold in what the model heard, then re-check ────────────────────────
 
   if (model) {
-    state = applyModelReading(state, model, asr, utterance, policy, clock, emit);
+    state = applyModelReading(
+      state,
+      model,
+      asr,
+      utterance,
+      policy,
+      clock,
+      emit,
+    );
 
     // The model may have caught a request for a human that the patterns missed
     // ("I'd rather not do this with a computer"). Count it, then re-evaluate.
@@ -309,7 +366,10 @@ export async function runTurn(input: TurnInput, deps: TurnDeps): Promise<TurnRes
       state,
       policy,
       order,
-      { safetyEscalation: safety.requiresEscalation, hints: mergeHints(hints, model.intent) },
+      {
+        safetyEscalation: safety.requiresEscalation,
+        hints: mergeHints(hints, model.intent),
+      },
       clock.now(),
     );
     if (recheck.required && !decision.required) {
@@ -324,19 +384,24 @@ export async function runTurn(input: TurnInput, deps: TurnDeps): Promise<TurnRes
 
   if (decision.required) {
     state = applyEscalation(state, decision, clock.now());
-    emit('ESCALATION_TRIGGERED', { reason: decision.reason, detail: decision.detail });
+    emit("ESCALATION_TRIGGERED", {
+      reason: decision.reason,
+      detail: decision.detail,
+    });
   }
 
   // Draft → screened → cleaned.
-  let reply = model?.reply?.trim() || fallbackReply(decision, verification.guidance, language);
+  let reply =
+    model?.reply?.trim() ||
+    fallbackReply(decision, verification.guidance, language);
 
   if (decision.required && !model) {
     reply = handoverLine(language);
   }
 
-  const screen = screenResponse(reply, state, state.phase === 'human_active');
+  const screen = screenResponse(reply, state, state.phase === "human_active");
   if (!screen.ok) {
-    emit('RESPONSE_REWRITTEN', { violations: screen.violations });
+    emit("RESPONSE_REWRITTEN", { violations: screen.violations });
     reply = decision.required ? handoverLine(language) : safeFallback(language);
   }
 
@@ -367,20 +432,30 @@ function applyProvisionalIntent(
   clock: Clock,
 ): ConversationState {
   const provisional: IntentKey | null = hints.refund
-    ? 'refund_request'
+    ? "refund_request"
     : hints.return_
-      ? 'return_request'
+      ? "return_request"
       : hints.cancel
-        ? 'cancellation_request'
+        ? "cancellation_request"
         : null;
 
   if (!provisional || state.intent.value === provisional) return state;
 
   // Do not downgrade a confidently classified intent on a passing mention.
-  if (state.intent.value !== 'unknown' && state.intent.confidence >= policy.high) return state;
+  if (
+    state.intent.value !== "unknown" &&
+    state.intent.confidence >= policy.high
+  )
+    return state;
 
   return recomputeConfidence(
-    { ...state, intent: { value: provisional, confidence: Math.max(state.intent.confidence, 0.7) } },
+    {
+      ...state,
+      intent: {
+        value: provisional,
+        confidence: Math.max(state.intent.confidence, 0.7),
+      },
+    },
     policy,
     clock,
   );
@@ -389,26 +464,35 @@ function applyProvisionalIntent(
 /** Apply a yes/no to whatever is currently awaiting one. */
 function applyPendingAnswers(
   state: ConversationState,
-  agreement: 'yes' | 'no' | 'unclear',
+  agreement: "yes" | "no" | "unclear",
   clock: Clock,
-  emit: (type: ConversationEvent['type'], payload: unknown) => void,
+  emit: (type: ConversationEvent["type"], payload: unknown) => void,
 ): ConversationState {
-  if (agreement === 'unclear') return state;
+  if (agreement === "unclear") return state;
 
   // The order read-back takes precedence: it is the gate everything else waits
   // behind, so an ambiguous "yes" must not be spent on a lesser field.
   if (state.verification.readBack && !state.verification.confirmed) {
-    emit(agreement === 'yes' ? 'ENTITY_CONFIRMED' : 'ORDER_VERIFICATION_FAILED', {
-      field: 'order',
-      accepted: agreement === 'yes',
-    });
-    return applyOrderConfirmation(state, agreement === 'yes', clock);
+    emit(
+      agreement === "yes" ? "ENTITY_CONFIRMED" : "ORDER_VERIFICATION_FAILED",
+      {
+        field: "order",
+        accepted: agreement === "yes",
+      },
+    );
+    return applyOrderConfirmation(state, agreement === "yes", clock);
   }
 
   if (state.pendingConfirmation) {
     const field = state.pendingConfirmation;
-    emit('ENTITY_CONFIRMED', { field, accepted: agreement === 'yes' });
-    return applyConfirmation(state, field, agreement === 'yes', undefined, clock);
+    emit("ENTITY_CONFIRMED", { field, accepted: agreement === "yes" });
+    return applyConfirmation(
+      state,
+      field,
+      agreement === "yes",
+      undefined,
+      clock,
+    );
   }
 
   return state;
@@ -422,13 +506,16 @@ function applyModelReading(
   utterance: string,
   policy: PolicyConfig,
   clock: Clock,
-  emit: (type: ConversationEvent['type'], payload: unknown) => void,
+  emit: (type: ConversationEvent["type"], payload: unknown) => void,
 ): ConversationState {
   let next = state;
 
   if (isIntentKey(model.intent)) {
     const confidence = clamp01(model.intentConfidence);
-    if (confidence >= next.intent.confidence || next.intent.value === 'unknown') {
+    if (
+      confidence >= next.intent.confidence ||
+      next.intent.value === "unknown"
+    ) {
       next = recomputeConfidence(
         { ...next, intent: { value: model.intent, confidence } },
         policy,
@@ -442,7 +529,7 @@ function applyModelReading(
   if (heard.orderId) {
     next = observeField(
       next,
-      'orderId',
+      "orderId",
       heard.orderId,
       combineAsrAndExtraction(asr, clamp01(heard.orderIdConfidence ?? 0.8)),
       utterance,
@@ -453,19 +540,32 @@ function applyModelReading(
   if (heard.customerName) {
     next = observeField(
       next,
-      'customerIdentity',
+      "customerIdentity",
       heard.customerName,
-      combineAsrAndExtraction(asr, clamp01(heard.customerNameConfidence ?? 0.8)),
+      combineAsrAndExtraction(
+        asr,
+        clamp01(heard.customerNameConfidence ?? 0.8),
+      ),
       utterance,
       clock,
     );
-    emit('ENTITY_DETECTED', { field: 'customerIdentity', value: heard.customerName });
+    emit("ENTITY_DETECTED", {
+      field: "customerIdentity",
+      value: heard.customerName,
+    });
   }
 
   if (heard.reason) {
     const field = reasonFieldFor(next.intent.value);
     if (field) {
-      next = observeField(next, field, heard.reason, combineAsrAndExtraction(asr, 0.9), utterance, clock);
+      next = observeField(
+        next,
+        field,
+        heard.reason,
+        combineAsrAndExtraction(asr, 0.9),
+        utterance,
+        clock,
+      );
     }
   }
 
@@ -485,8 +585,13 @@ async function attemptResolution(
   hints: { cancel: boolean; return_: boolean; refund: boolean },
   deps: TurnDeps,
   clock: Clock,
-): Promise<{ state: ConversationState; instruction: string | null; executed: string | null }> {
-  const wantsCancel = state.intent.value === 'cancellation_request' || hints.cancel;
+): Promise<{
+  state: ConversationState;
+  instruction: string | null;
+  executed: string | null;
+}> {
+  const wantsCancel =
+    state.intent.value === "cancellation_request" || hints.cancel;
   if (!wantsCancel) return { state, instruction: null, executed: null };
 
   const reason = state.requiredInformation.cancellationReason;
@@ -494,15 +599,15 @@ async function attemptResolution(
     return {
       state,
       instruction:
-        'Before cancelling, ask briefly why they want to cancel — one short question, not an ' +
-        'interrogation. Make clear you can do it for them.',
+        "Before cancelling, ask briefly why they want to cancel — one short question, not an " +
+        "interrogation. Make clear you can do it for them.",
       executed: null,
     };
   }
 
   const verdict = evaluateCancellation(order, deps.policy);
 
-  if (verdict.outcome === 'not_possible') {
+  if (verdict.outcome === "not_possible") {
     return {
       state,
       instruction: `Explain plainly, in one sentence: ${verdict.reason} Then ask what else you can do.`,
@@ -510,23 +615,23 @@ async function attemptResolution(
     };
   }
 
-  if (verdict.outcome === 'ai_may_cancel' && deps.cancelOrder) {
+  if (verdict.outcome === "ai_may_cancel" && deps.cancelOrder) {
     const done = await deps.cancelOrder(order.id);
     if (done) {
       return {
-        state: noteExecutedAction(state, 'cancel_order', clock),
+        state: noteExecutedAction(state, "cancel_order", clock),
         instruction:
           `You have just cancelled ${describeOrder(order)} — it is done, so say so plainly and ` +
           `confidently. Mention that any payment made comes back to the original payment method ` +
           `in five to seven working days. Do not offer to transfer them anywhere.`,
-        executed: 'cancel_order',
+        executed: "cancel_order",
       };
     }
     return {
       state,
       instruction:
-        'The cancellation attempt failed. Say honestly that it did not go through and that you are ' +
-        'getting a colleague to finish it. Do not claim it is cancelled.',
+        "The cancellation attempt failed. Say honestly that it did not go through and that you are " +
+        "getting a colleague to finish it. Do not claim it is cancelled.",
       executed: null,
     };
   }
@@ -539,9 +644,9 @@ function mergeHints(
   modelIntent: string,
 ): { cancel: boolean; return_: boolean; refund: boolean } {
   return {
-    cancel: hints.cancel || modelIntent === 'cancellation_request',
-    return_: hints.return_ || modelIntent === 'return_request',
-    refund: hints.refund || modelIntent === 'refund_request',
+    cancel: hints.cancel || modelIntent === "cancellation_request",
+    return_: hints.return_ || modelIntent === "return_request",
+    refund: hints.refund || modelIntent === "refund_request",
   };
 }
 
@@ -552,12 +657,12 @@ function mergeHints(
  * as an answer only when a name was actually the question.
  */
 function isAwaitingName(state: ConversationState): boolean {
-  if (state.pendingConfirmation === 'customerIdentity') return true;
+  if (state.pendingConfirmation === "customerIdentity") return true;
   const identity = state.requiredInformation.customerIdentity;
   if (identity?.confirmed) return false;
   // The order has been found but no name heard yet — that is exactly the point in
   // the sequence where the gate asks for one.
-  return state.verification.lookupOutcome === 'found' && !identity?.value;
+  return state.verification.lookupOutcome === "found" && !identity?.value;
 }
 
 function fallbackReply(
@@ -567,26 +672,26 @@ function fallbackReply(
 ): string {
   if (decision.required) return handoverLine(language);
   void guidance;
-  return language === 'hi'
-    ? 'माफ़ कीजिए, ज़रा दोबारा बताइए?'
+  return language === "hi"
+    ? "माफ़ कीजिए, ज़रा दोबारा बताइए?"
     : "Sorry, could you say that once more?";
 }
 
 function handoverLine(language: LanguageCode): string {
-  return language === 'hi'
-    ? 'ठीक है, मैं आपको अपने कलीग से जोड़ रही हूँ — जो जानकारी आपने दी है वो सब उनके पास पहुँच रही है, दोबारा बताने की ज़रूरत नहीं पड़ेगी। लाइन पर बने रहिए।'
+  return language === "hi"
+    ? "ठीक है, मैं आपको अपने कलीग से जोड़ रही हूँ — जो जानकारी आपने दी है वो सब उनके पास पहुँच रही है, दोबारा बताने की ज़रूरत नहीं पड़ेगी। लाइन पर बने रहिए।"
     : "Right — I'm putting you through to a colleague now. Everything you've told me goes across with you, so you won't have to repeat any of it. Do stay on the line.";
 }
 
 const INTENT_KEYS: ReadonlySet<string> = new Set([
-  'order_status',
-  'delivery_complaint',
-  'cancellation_request',
-  'return_request',
-  'refund_request',
-  'address_change',
-  'general_query',
-  'unknown',
+  "order_status",
+  "delivery_complaint",
+  "cancellation_request",
+  "return_request",
+  "refund_request",
+  "address_change",
+  "general_query",
+  "unknown",
 ]);
 
 function isIntentKey(value: string): value is IntentKey {
@@ -599,10 +704,10 @@ function clamp01(value: number): number {
 }
 
 /** Opening line of a call. Deterministic, so it never drifts. */
-export function greeting(language: LanguageCode = 'en'): string {
-  return language === 'hi'
-    ? 'नमस्ते, मैं आपका अगोरा वॉयस एजेंट बोल रहा हूँ। बताइए, मैं आपकी क्या मदद कर सकता हूँ?'
-    : 'Hello, this is your Agora Voice Agent. How can I help you with your order today?';
+export function greeting(language: LanguageCode = "en"): string {
+  return language === "hi"
+    ? "नमस्ते, मैं आपका अगोरा वॉयस एजेंट बोल रहा हूँ। बताइए, मैं आपकी क्या मदद कर सकता हूँ?"
+    : "Hello, this is your Agora Voice Agent. How can I help you with your order today?";
 }
 
 export { createState };

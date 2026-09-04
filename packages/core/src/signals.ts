@@ -1,4 +1,4 @@
-import type { LanguageCode } from './types.js';
+import type { LanguageCode } from "./types.js";
 
 /**
  * Lexical signal detection.
@@ -65,7 +65,7 @@ const NEGATIVE: readonly RegExp[] = [
   /^\s*(नहीं|ना|गलत|गड़बड़)/,
 ];
 
-export type Agreement = 'yes' | 'no' | 'unclear';
+export type Agreement = "yes" | "no" | "unclear";
 
 /**
  * Read a yes/no answer to a read-back.
@@ -77,9 +77,9 @@ export type Agreement = 'yes' | 'no' | 'unclear';
 export function detectAgreement(utterance: string): Agreement {
   const yes = AFFIRMATIVE.some((p) => p.test(utterance));
   const no = NEGATIVE.some((p) => p.test(utterance));
-  if (yes && !no) return 'yes';
-  if (no && !yes) return 'no';
-  return 'unclear';
+  if (yes && !no) return "yes";
+  if (no && !yes) return "no";
+  return "unclear";
 }
 
 // ── Intent hints ──────────────────────────────────────────────────────────────
@@ -129,7 +129,8 @@ export function detectIntentHints(utterance: string): IntentHints {
 const DEVANAGARI = /[ऀ-ॿ]/;
 
 /** Common romanised-Hindi function words, which Latin script alone can't reveal. */
-const ROMAN_HINDI = /\b(mera|meri|mujhe|aap|aapka|kya|kyu|kyun|nahi|hai|hain|karo|kar|kab|kahan|kaise|bhai|order\s*kahan|abhi|thoda|bata|batao|chahiye|hua|liya|diya)\b/i;
+const ROMAN_HINDI =
+  /\b(mera|meri|mujhe|aap|aapka|kya|kyu|kyun|nahi|hai|hain|karo|kar|kab|kahan|kaise|bhai|order\s*kahan|abhi|thoda|bata|batao|chahiye|hua|liya|diya)\b/i;
 
 /**
  * Best-effort language of an utterance.
@@ -139,9 +140,12 @@ const ROMAN_HINDI = /\b(mera|meri|mujhe|aap|aapka|kya|kyu|kyun|nahi|hai|hain|kar
  * character is Latin — and picking an English voice for that reply is exactly
  * what makes the current agent sound wrong.
  */
-export function detectLanguage(utterance: string, fallback: LanguageCode = 'en'): LanguageCode {
-  if (DEVANAGARI.test(utterance)) return 'hi';
-  if (ROMAN_HINDI.test(utterance)) return 'hi';
+export function detectLanguage(
+  utterance: string,
+  fallback: LanguageCode = "en",
+): LanguageCode {
+  if (DEVANAGARI.test(utterance)) return "hi";
+  if (ROMAN_HINDI.test(utterance)) return "hi";
   return fallback;
 }
 
@@ -150,13 +154,15 @@ export function extractOrderIdCandidates(utterance: string): string[] {
   const found = new Set<string>();
 
   // Full formatted ids: ORD-773-9921, ECH-2026-00042.
-  for (const m of utterance.matchAll(/\b([A-Z]{3}-[\dA-Z]{3,4}-[\dA-Z]{4,5})\b/gi)) {
+  for (const m of utterance.matchAll(
+    /\b([A-Z]{3}-[\dA-Z]{3,4}-[\dA-Z]{4,5})\b/gi,
+  )) {
     if (m[1]) found.add(m[1].toUpperCase());
   }
 
   // Bare digit runs of 4+, as spoken ("it's 4852"). Strip separators callers
   // insert when reading digits aloud: "4 8 5 2", "4-8-5-2".
-  const collapsed = utterance.replace(/(?<=\d)[\s-](?=\d)/g, '');
+  const collapsed = utterance.replace(/(?<=\d)[\s-](?=\d)/g, "");
   for (const m of collapsed.matchAll(/\b(\d{4,12})\b/g)) {
     if (m[1]) found.add(m[1]);
   }
@@ -200,7 +206,10 @@ const NOT_A_NAME =
  * verify identity at all unless the language model happened to extract it, which
  * left the whole requirement-7 gate dependent on the model being available.
  */
-export function extractPersonName(utterance: string, expectingName: boolean): string | null {
+export function extractPersonName(
+  utterance: string,
+  expectingName: boolean,
+): string | null {
   const text = utterance.trim();
   if (text.length === 0) return null;
 
@@ -215,8 +224,8 @@ export function extractPersonName(utterance: string, expectingName: boolean): st
   // Bare answer to "whose name is the order under?" — strip a leading filler
   // ("it's", "yeh", "ji") and take what remains if it looks like a name.
   const bare = text
-    .replace(/^(?:it'?s|its|yeh|ye|ji|haan|yes|umm+|uh+)\s+/i, '')
-    .replace(/[.!?,]+$/, '')
+    .replace(/^(?:it'?s|its|yeh|ye|ji|haan|yes|umm+|uh+)\s+/i, "")
+    .replace(/[.!?,]+$/, "")
     .trim();
 
   return isPlausibleName(bare) ? tidyName(bare) : null;
@@ -238,9 +247,11 @@ function tidyName(name: string): string {
     .filter(Boolean)
     .map((word) =>
       // Leave Devanagari alone; it has no case.
-      /[ऀ-ॿ]/.test(word) ? word : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase(),
+      /[ऀ-ॿ]/.test(word)
+        ? word
+        : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase(),
     )
-    .join(' ');
+    .join(" ");
 }
 
 /** Free-text reason for a cancellation / return / refund. */
@@ -249,8 +260,10 @@ export function extractReason(utterance: string): string | null {
   if (text.length < 8) return null;
 
   // "because ...", "since ...", "kyunki ...", "क्योंकि ..."
-  const causal = /\b(?:because|since|as|kyunki|kyonki)\b\s+(.{6,160})/i.exec(text);
-  if (causal?.[1]) return causal[1].trim().replace(/[.!?]+$/, '');
+  const causal = /\b(?:because|since|as|kyunki|kyonki)\b\s+(.{6,160})/i.exec(
+    text,
+  );
+  if (causal?.[1]) return causal[1].trim().replace(/[.!?]+$/, "");
 
   const devanagariCausal = /क्योंकि\s+(.{6,160})/u.exec(text);
   if (devanagariCausal?.[1]) return devanagariCausal[1].trim();
@@ -263,7 +276,7 @@ export function extractReason(utterance: string): string | null {
     /(galat|kharab|toot|zarurat nahi|der ho gay|nahi chahiye)/i.test(text) ||
     /(गलत|खराब|टूट|ज़रूरत नहीं|देर हो गय|नहीं चाहिए)/u.test(text)
   ) {
-    return text.replace(/[.!?]+$/, '').slice(0, 200);
+    return text.replace(/[.!?]+$/, "").slice(0, 200);
   }
 
   return null;

@@ -239,8 +239,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               <Menu className="size-[18px]" />
             </button>
             <h1 className="truncate font-display text-[15px] font-semibold">
-              {current?.name ??
-                (path === "/settings" ? "Settings" : "Nerv")}
+              {current?.name ?? (path === "/settings" ? "Settings" : "Nerv")}
             </h1>
           </div>
 
@@ -344,9 +343,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             />
             <div className="animate-rise absolute inset-y-0 left-0 flex w-[250px] flex-col border-r border-border bg-sidebar">
               <div className="flex h-14 items-center justify-between px-3.5">
-                <span className="font-display text-[15px] font-bold">
-                  Nerv
-                </span>
+                <span className="font-display text-[15px] font-bold">Nerv</span>
                 <button
                   onClick={() => setMobileOpen(false)}
                   className="rounded-md p-1.5 hover:bg-muted"

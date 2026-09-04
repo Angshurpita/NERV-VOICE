@@ -1,8 +1,8 @@
-import type { RetentionPlan } from './persuasion.js';
-import type { NextQuestion } from './conversation-state.js';
-import type { VerificationPlan } from './verification.js';
-import { describeOrder, humanStatus } from './verification.js';
-import type { ConversationState, LanguageCode, Order } from './types.js';
+import type { RetentionPlan } from "./persuasion.js";
+import type { NextQuestion } from "./conversation-state.js";
+import type { VerificationPlan } from "./verification.js";
+import { describeOrder, humanStatus } from "./verification.js";
+import type { ConversationState, LanguageCode, Order } from "./types.js";
 
 /**
  * Prompt construction — requirement 8, "the agent must respond humanly".
@@ -16,7 +16,7 @@ import type { ConversationState, LanguageCode, Order } from './types.js';
  * good human agent would say.
  */
 
-export const AGENT_NAME = 'Agora Voice Agent';
+export const AGENT_NAME = "Agora Voice Agent";
 
 export const SYSTEM_PROMPT = `You are ${AGENT_NAME}, a customer support associate at an Indian e-commerce company. You are on a live voice call. Everything you write is spoken aloud, so write the way people talk, not the way documents read.
 
@@ -94,7 +94,7 @@ GOOD: "It's already out with the courier for today, so I can't stop it from here
 export interface TurnPromptInput {
   state: ConversationState;
   /** Recent turns, oldest first. Trimmed by the caller. */
-  history: Array<{ speaker: 'caller' | 'agent'; text: string }>;
+  history: Array<{ speaker: "caller" | "agent"; text: string }>;
   utterance: string;
   /** The order in hand, if one has been looked up and confirmed. */
   order: Order | null;
@@ -113,15 +113,28 @@ export interface TurnPromptInput {
  * not something it can do even if it tries.
  */
 export function buildTurnPrompt(input: TurnPromptInput): string {
-  const { state, history, utterance, order, instruction, safetyGuidance, language } = input;
+  const {
+    state,
+    history,
+    utterance,
+    order,
+    instruction,
+    safetyGuidance,
+    language,
+  } = input;
 
   const sections: string[] = [FEW_SHOTS];
 
   sections.push(
     `CALL SO FAR\n${
       history.length === 0
-        ? '(this is the first thing the caller has said)'
-        : history.map((h) => `${h.speaker === 'caller' ? 'Caller' : AGENT_NAME}: ${h.text}`).join('\n')
+        ? "(this is the first thing the caller has said)"
+        : history
+            .map(
+              (h) =>
+                `${h.speaker === "caller" ? "Caller" : AGENT_NAME}: ${h.text}`,
+            )
+            .join("\n")
     }`,
   );
 
@@ -129,10 +142,10 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
     `WHAT YOU KNOW FOR CERTAIN\n${
       order
         ? `Verified ${describeOrder(order, state.verification.ordererName)}.\n` +
-          `Courier: ${order.courier ?? 'not assigned yet'}${order.trackingId ? `, tracking ${order.trackingId}` : ''}.\n` +
+          `Courier: ${order.courier ?? "not assigned yet"}${order.trackingId ? `, tracking ${order.trackingId}` : ""}.\n` +
           `Delivery address on file: ${order.deliveryAddress}.\n` +
-          `Status history: ${order.history.map((e) => `${humanStatus(e.status)} on ${e.at.slice(0, 10)}`).join('; ')}.`
-        : 'No order has been verified yet, so you know nothing about any order. Do not describe, guess at, or imply any order detail.'
+          `Status history: ${order.history.map((e) => `${humanStatus(e.status)} on ${e.at.slice(0, 10)}`).join("; ")}.`
+        : "No order has been verified yet, so you know nothing about any order. Do not describe, guess at, or imply any order detail."
     }`,
   );
 
@@ -143,18 +156,20 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
   }
 
   if (safetyGuidance) {
-    sections.push(`SAFETY CONSTRAINT — this overrides everything below.\n${safetyGuidance}`);
+    sections.push(
+      `SAFETY CONSTRAINT — this overrides everything below.\n${safetyGuidance}`,
+    );
   }
 
   sections.push(`Caller just said: "${utterance}"`);
 
   sections.push(
     `THIS TURN MUST DO EXACTLY THIS\n${instruction}\n\n` +
-      `Reply in ${language === 'hi' ? 'Hindi, Devanagari script' : 'English'}. ` +
+      `Reply in ${language === "hi" ? "Hindi, Devanagari script" : "English"}. ` +
       `One or two sentences. Nothing else — no preamble, no sign-off.`,
   );
 
-  return sections.join('\n\n───\n\n');
+  return sections.join("\n\n───\n\n");
 }
 
 /**
@@ -177,10 +192,10 @@ export function composeInstruction(args: {
 
   if (escalating) {
     return (
-      'Hand the call over. Tell the caller in one or two sentences that you are connecting them to a ' +
-      'colleague, that everything you have gathered goes across with them so they will not repeat ' +
-      'themselves, and ask them to hold. Do not ask any further question. Do not say the colleague ' +
-      'has joined.'
+      "Hand the call over. Tell the caller in one or two sentences that you are connecting them to a " +
+      "colleague, that everything you have gathered goes across with them so they will not repeat " +
+      "themselves, and ask them to hold. Do not ask any further question. Do not say the colleague " +
+      "has joined."
     );
   }
 
@@ -188,27 +203,27 @@ export function composeInstruction(args: {
     // Retention still gets a voice while verifying, because ignoring a request
     // for a human to ask for an order number again is precisely the behaviour
     // that makes callers escalate.
-    if (retention && retention.stance !== 'HAND_OVER') {
+    if (retention && retention.stance !== "HAND_OVER") {
       return `${retention.guidance}\n\nThen, in the same breath, do this: ${verification.guidance}`;
     }
     return verification.guidance;
   }
 
-  if (retention && retention.stance !== 'HAND_OVER') {
+  if (retention && retention.stance !== "HAND_OVER") {
     return retention.guidance;
   }
 
   if (resolution) return resolution;
 
   if (question) {
-    return question.kind === 'confirm'
+    return question.kind === "confirm"
       ? `${question.intent} Ask a direct yes/no question. Read any number digit by digit.`
       : question.intent;
   }
 
   return (
-    'Everything you need is confirmed. Answer what the caller actually asked, using only the facts ' +
-    'above, then ask if there is anything else.'
+    "Everything you need is confirmed. Answer what the caller actually asked, using only the facts " +
+    "above, then ask if there is anything else."
   );
 }
 
@@ -216,18 +231,24 @@ export function composeInstruction(args: {
 
 /** Stock phrases that betray a script. Removed rather than trusted to the model. */
 const ROBOTIC: ReadonlyArray<[RegExp, string]> = [
-  [/\bI apolog(?:ise|ize) for (?:the|any) inconvenience(?: caused)?\.?\s*/gi, 'Sorry about that. '],
-  [/\bas an AI(?: language model| assistant)?,?\s*/gi, ''],
-  [/\bI'?m (?:just )?an? (?:AI|bot|automated assistant)[^.!?]*[.!?]\s*/gi, ''],
-  [/\bkindly\b/gi, 'please'],
-  [/\bplease be informed that\s*/gi, ''],
-  [/\bas per (?:our|the) records,?\s*/gi, ''],
-  [/\byour request has been noted\.?\s*/gi, ''],
-  [/\bI hope (?:this|that) helps[.!]?\s*/gi, ''],
-  [/\bIs there anything else I can (?:help|assist) you with today\?/gi, 'Anything else?'],
-  [/\bकृपया\s+/g, ''],
-  [/\bमैं आपकी (?:चिंता|समस्या) (?:को )?समझती हूँ[।,]?\s*/g, ''],
-  [/\bअसुविधा के लिए (?:हमें )?खेद है[।,]?\s*/g, 'माफ़ कीजिए। '],
+  [
+    /\bI apolog(?:ise|ize) for (?:the|any) inconvenience(?: caused)?\.?\s*/gi,
+    "Sorry about that. ",
+  ],
+  [/\bas an AI(?: language model| assistant)?,?\s*/gi, ""],
+  [/\bI'?m (?:just )?an? (?:AI|bot|automated assistant)[^.!?]*[.!?]\s*/gi, ""],
+  [/\bkindly\b/gi, "please"],
+  [/\bplease be informed that\s*/gi, ""],
+  [/\bas per (?:our|the) records,?\s*/gi, ""],
+  [/\byour request has been noted\.?\s*/gi, ""],
+  [/\bI hope (?:this|that) helps[.!]?\s*/gi, ""],
+  [
+    /\bIs there anything else I can (?:help|assist) you with today\?/gi,
+    "Anything else?",
+  ],
+  [/\bकृपया\s+/g, ""],
+  [/\bमैं आपकी (?:चिंता|समस्या) (?:को )?समझती हूँ[।,]?\s*/g, ""],
+  [/\bअसुविधा के लिए (?:हमें )?खेद है[।,]?\s*/g, "माफ़ कीजिए। "],
 ];
 
 /**
@@ -237,30 +258,34 @@ const ROBOTIC: ReadonlyArray<[RegExp, string]> = [
  * not eliminate it, and one "I apologize for the inconvenience caused" undoes a
  * whole call's worth of sounding human.
  */
-export function humanise(reply: string, language: LanguageCode, maxSentences = 3): string {
+export function humanise(
+  reply: string,
+  language: LanguageCode,
+  maxSentences = 3,
+): string {
   let out = reply.trim();
 
   // Structure that cannot be spoken.
-  out = out.replace(/```[\s\S]*?```/g, ' ');
-  out = out.replace(/^\s*(?:[-*•]|\d+\.)\s+/gm, '');
-  out = out.replace(/[*_`#>]/g, '');
-  out = out.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, '');
+  out = out.replace(/```[\s\S]*?```/g, " ");
+  out = out.replace(/^\s*(?:[-*•]|\d+\.)\s+/gm, "");
+  out = out.replace(/[*_`#>]/g, "");
+  out = out.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, "");
 
   for (const [pattern, replacement] of ROBOTIC) {
     out = out.replace(pattern, replacement);
   }
 
-  out = out.replace(/\s{2,}/g, ' ').trim();
+  out = out.replace(/\s{2,}/g, " ").trim();
 
   // Hard cap on length. A model that ignores "two sentences" gets truncated at a
   // sentence boundary rather than mid-clause.
   const sentences = out.split(/(?<=[.!?।])\s+/).filter(Boolean);
   if (sentences.length > maxSentences) {
-    out = sentences.slice(0, maxSentences).join(' ');
+    out = sentences.slice(0, maxSentences).join(" ");
   }
 
   if (out.length === 0) {
-    return language === 'hi' ? 'एक सेकंड दीजिए।' : 'One second.';
+    return language === "hi" ? "एक सेकंड दीजिए।" : "One second.";
   }
 
   return out;
@@ -276,38 +301,38 @@ export function humanise(reply: string, language: LanguageCode, maxSentences = 3
  * are treated as noisy inputs to `confidence.ts`, never as verdicts.
  */
 export const TURN_RESPONSE_SCHEMA = {
-  type: 'object',
+  type: "object",
   properties: {
     intent: {
-      type: 'string',
+      type: "string",
       enum: [
-        'order_status',
-        'delivery_complaint',
-        'cancellation_request',
-        'return_request',
-        'refund_request',
-        'address_change',
-        'general_query',
-        'unknown',
+        "order_status",
+        "delivery_complaint",
+        "cancellation_request",
+        "return_request",
+        "refund_request",
+        "address_change",
+        "general_query",
+        "unknown",
       ],
     },
-    intentConfidence: { type: 'number' },
-    language: { type: 'string', enum: ['hi', 'en'] },
+    intentConfidence: { type: "number" },
+    language: { type: "string", enum: ["hi", "en"] },
     heard: {
-      type: 'object',
+      type: "object",
       properties: {
-        orderId: { type: 'string' },
-        orderIdConfidence: { type: 'number' },
-        customerName: { type: 'string' },
-        customerNameConfidence: { type: 'number' },
-        reason: { type: 'string' },
+        orderId: { type: "string" },
+        orderIdConfidence: { type: "number" },
+        customerName: { type: "string" },
+        customerNameConfidence: { type: "number" },
+        reason: { type: "string" },
       },
     },
-    wantsHuman: { type: 'boolean' },
-    answeredYesNo: { type: 'string', enum: ['yes', 'no', 'neither'] },
-    reply: { type: 'string' },
+    wantsHuman: { type: "boolean" },
+    answeredYesNo: { type: "string", enum: ["yes", "no", "neither"] },
+    reply: { type: "string" },
   },
-  required: ['intent', 'intentConfidence', 'language', 'reply'],
+  required: ["intent", "intentConfidence", "language", "reply"],
 } as const;
 
 export interface ModelTurnOutput {
@@ -322,6 +347,6 @@ export interface ModelTurnOutput {
     reason?: string;
   };
   wantsHuman?: boolean;
-  answeredYesNo?: 'yes' | 'no' | 'neither';
+  answeredYesNo?: "yes" | "no" | "neither";
   reply: string;
 }

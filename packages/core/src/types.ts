@@ -8,7 +8,7 @@
 
 // ── Language ──────────────────────────────────────────────────────────────────
 
-export type LanguageCode = 'hi' | 'en';
+export type LanguageCode = "hi" | "en";
 
 export interface LanguageState {
   /** Language the caller is currently speaking. */
@@ -30,33 +30,34 @@ export interface LanguageState {
  * depends on.
  */
 export type OrderStatus =
-  | 'PLACED'
-  | 'PACKED'
-  | 'SHIPPED'
-  | 'IN_TRANSIT'
-  | 'OUT_FOR_DELIVERY'
-  | 'DELIVERED'
-  | 'DELAYED'
-  | 'CANCELLED'
-  | 'RETURN_REQUESTED'
-  | 'RETURN_PICKED_UP'
-  | 'RETURNED'
-  | 'REFUND_PENDING'
-  | 'REFUNDED'
-  | 'LOST_IN_TRANSIT'
-  | 'DELIVERY_FAILED'
-  | 'RTO';
+  | "PLACED"
+  | "PACKED"
+  | "SHIPPED"
+  | "IN_TRANSIT"
+  | "OUT_FOR_DELIVERY"
+  | "DELIVERED"
+  | "DELAYED"
+  | "CANCELLED"
+  | "RETURN_REQUESTED"
+  | "RETURN_PICKED_UP"
+  | "RETURNED"
+  | "REFUND_PENDING"
+  | "REFUNDED"
+  | "LOST_IN_TRANSIT"
+  | "DELIVERY_FAILED"
+  | "RTO";
 
-export type PaymentMethod = 'PREPAID_CARD' | 'UPI' | 'NET_BANKING' | 'COD' | 'EMI' | 'WALLET';
+export type PaymentMethod =
+  "PREPAID_CARD" | "UPI" | "NET_BANKING" | "COD" | "EMI" | "WALLET";
 
 /** Return policy class for a product category. */
 export type ReturnPolicyClass =
   /** Returnable for a refund within the window. */
-  | 'RETURNABLE'
+  | "RETURNABLE"
   /** Defect-only exchange, no refund (e.g. large appliances). */
-  | 'REPLACEMENT_ONLY'
+  | "REPLACEMENT_ONLY"
   /** Never returnable (innerwear, perishables, gift cards). */
-  | 'NON_RETURNABLE';
+  | "NON_RETURNABLE";
 
 export interface OrderItem {
   sku: string;
@@ -108,25 +109,25 @@ export interface Order {
 }
 
 export type OrderLookupResult =
-  | { outcome: 'found'; order: Order; customer: Customer }
-  | { outcome: 'not_found'; orderId: string }
-  | { outcome: 'backend_unavailable'; orderId: string };
+  | { outcome: "found"; order: Order; customer: Customer }
+  | { outcome: "not_found"; orderId: string }
+  | { outcome: "backend_unavailable"; orderId: string };
 
 // ── Fields ────────────────────────────────────────────────────────────────────
 
 export type FieldKey =
-  | 'orderId'
-  | 'customerIdentity'
-  | 'problem'
-  | 'cancellationReason'
-  | 'returnReason'
-  | 'refundReason'
-  | 'additionalContext';
+  | "orderId"
+  | "customerIdentity"
+  | "problem"
+  | "cancellationReason"
+  | "returnReason"
+  | "refundReason"
+  | "additionalContext";
 
 /** P0 is asked before P1, P1 before P2. */
-export type Priority = 'P0' | 'P1' | 'P2';
+export type Priority = "P0" | "P1" | "P2";
 
-export type ConfidenceLevel = 'HIGH' | 'MEDIUM' | 'LOW';
+export type ConfidenceLevel = "HIGH" | "MEDIUM" | "LOW";
 
 /**
  * One candidate value heard for a field. Retained even after being superseded,
@@ -170,14 +171,14 @@ export interface FieldDefinition {
 // ── Intent ────────────────────────────────────────────────────────────────────
 
 export type IntentKey =
-  | 'order_status'
-  | 'delivery_complaint'
-  | 'cancellation_request'
-  | 'return_request'
-  | 'refund_request'
-  | 'address_change'
-  | 'general_query'
-  | 'unknown';
+  | "order_status"
+  | "delivery_complaint"
+  | "cancellation_request"
+  | "return_request"
+  | "refund_request"
+  | "address_change"
+  | "general_query"
+  | "unknown";
 
 export interface IntentState {
   value: IntentKey;
@@ -197,7 +198,7 @@ export interface VerificationState {
   /** True once the order service has been queried for that id. */
   lookedUp: boolean;
   /** Outcome of that lookup. */
-  lookupOutcome: 'found' | 'not_found' | 'backend_unavailable' | null;
+  lookupOutcome: "found" | "not_found" | "backend_unavailable" | null;
   /** Name on the order, from the database — never from the caller. */
   ordererName: string | null;
   /** True once the AI has read the order details back to the caller. */
@@ -225,11 +226,11 @@ export interface VerificationState {
  * AI has no truthful answer available because the order service is down.
  */
 export type EscalationReason =
-  | 'CUSTOMER_INSISTED_HUMAN'
-  | 'REFUND_OR_RETURN'
-  | 'CANCEL_WHILE_OUT_FOR_DELIVERY'
-  | 'SAFETY_POLICY'
-  | 'BACKEND_FAILURE';
+  | "CUSTOMER_INSISTED_HUMAN"
+  | "REFUND_OR_RETURN"
+  | "CANCEL_WHILE_OUT_FOR_DELIVERY"
+  | "SAFETY_POLICY"
+  | "BACKEND_FAILURE";
 
 /**
  * What the AI established before handing over. Requirement 6.2 asks for "proper
@@ -268,23 +269,23 @@ export interface EscalationState {
  */
 export type RetentionStance =
   /** First ask — acknowledge, then offer the concrete thing it can do now. */
-  | 'OFFER_SELF_SERVE'
+  | "OFFER_SELF_SERVE"
   /** Second ask — empathise, name the outcome, ask for one chance. */
-  | 'SECOND_ATTEMPT'
+  | "SECOND_ATTEMPT"
   /** Third ask, or a hard refusal — stop persuading. */
-  | 'HAND_OVER';
+  | "HAND_OVER";
 
 // ── Conversation state ────────────────────────────────────────────────────────
 
 export type AgentPhase =
-  | 'idle'
-  | 'listening'
-  | 'thinking'
-  | 'speaking'
-  | 'interrupted'
-  | 'escalating'
-  | 'human_active'
-  | 'ended';
+  | "idle"
+  | "listening"
+  | "thinking"
+  | "speaking"
+  | "interrupted"
+  | "escalating"
+  | "human_active"
+  | "ended";
 
 export interface CustomerState {
   /** Populated from a database lookup, never from the model. */
@@ -328,25 +329,25 @@ export interface ConversationState {
 // ── Events ────────────────────────────────────────────────────────────────────
 
 export type EventType =
-  | 'CALL_STARTED'
-  | 'CALL_ENDED'
-  | 'TRANSCRIPT_FINAL'
-  | 'LANGUAGE_CHANGED'
-  | 'ENTITY_DETECTED'
-  | 'ENTITY_CONFIRMED'
-  | 'ORDER_VERIFIED'
-  | 'ORDER_VERIFICATION_FAILED'
-  | 'RETENTION_ATTEMPTED'
-  | 'CONFIDENCE_CHANGED'
-  | 'QUESTION_ASKED'
-  | 'ESCALATION_TRIGGERED'
-  | 'CASE_CREATED'
-  | 'HUMAN_AGENT_ACCEPTED'
-  | 'CASE_RESOLVED'
-  | 'SAFETY_BLOCKED'
-  | 'TOOL_EXECUTED'
-  | 'TOOL_DENIED'
-  | 'RESPONSE_REWRITTEN';
+  | "CALL_STARTED"
+  | "CALL_ENDED"
+  | "TRANSCRIPT_FINAL"
+  | "LANGUAGE_CHANGED"
+  | "ENTITY_DETECTED"
+  | "ENTITY_CONFIRMED"
+  | "ORDER_VERIFIED"
+  | "ORDER_VERIFICATION_FAILED"
+  | "RETENTION_ATTEMPTED"
+  | "CONFIDENCE_CHANGED"
+  | "QUESTION_ASKED"
+  | "ESCALATION_TRIGGERED"
+  | "CASE_CREATED"
+  | "HUMAN_AGENT_ACCEPTED"
+  | "CASE_RESOLVED"
+  | "SAFETY_BLOCKED"
+  | "TOOL_EXECUTED"
+  | "TOOL_DENIED"
+  | "RESPONSE_REWRITTEN";
 
 export interface ConversationEvent<P = unknown> {
   type: EventType;

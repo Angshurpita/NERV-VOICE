@@ -1,6 +1,10 @@
-import { thresholdFor, type PolicyConfig } from './config.js';
-import { overallConfidence } from './confidence.js';
-import { FIELD_DEFINITIONS, isCritical, orderedRequiredFields } from './fields.js';
+import { thresholdFor, type PolicyConfig } from "./config.js";
+import { overallConfidence } from "./confidence.js";
+import {
+  FIELD_DEFINITIONS,
+  isCritical,
+  orderedRequiredFields,
+} from "./fields.js";
 import type {
   Candidate,
   ConversationState,
@@ -11,7 +15,7 @@ import type {
   LanguageCode,
   OrderStatus,
   VerificationState,
-} from './types.js';
+} from "./types.js";
 
 /**
  * Deterministic conversation state manager.
@@ -54,19 +58,30 @@ export function createState(
   return {
     sessionId,
     channelName: null,
-    phase: 'idle',
+    phase: "idle",
     customer: {
       id: customer.id ?? null,
       name: customer.name ?? null,
       identityVerified: customer.identityVerified ?? false,
     },
-    intent: { value: 'unknown', confidence: 0 },
-    language: { primary: 'en', secondary: null, codeSwitched: false, switchCount: 0 },
+    intent: { value: "unknown", confidence: 0 },
+    language: {
+      primary: "en",
+      secondary: null,
+      codeSwitched: false,
+      switchCount: 0,
+    },
     verification: emptyVerification(),
     requiredInformation: {},
     attempts: {},
     confidence: { overall: 0 },
-    escalation: { required: false, reason: null, detail: null, report: null, triggeredAt: null },
+    escalation: {
+      required: false,
+      reason: null,
+      detail: null,
+      report: null,
+      triggeredAt: null,
+    },
     pendingConfirmation: null,
     humanRequestCount: 0,
     refusedAiHelp: false,
@@ -79,7 +94,13 @@ export function createState(
 }
 
 function emptyField(): FieldState {
-  return { value: null, candidates: [], confidence: 0, confirmed: false, display: null };
+  return {
+    value: null,
+    candidates: [],
+    confidence: 0,
+    confirmed: false,
+    display: null,
+  };
 }
 
 // ── Observation ───────────────────────────────────────────────────────────────
@@ -116,16 +137,26 @@ export function observeField(
   };
 
   // Re-hearing the same value reinforces it rather than adding a duplicate.
-  const priorIndex = existing.candidates.findIndex((c) => c.value === normalised);
+  const priorIndex = existing.candidates.findIndex(
+    (c) => c.value === normalised,
+  );
   const candidates =
     priorIndex >= 0
       ? existing.candidates.map((c, i) =>
-          i === priorIndex ? { ...c, confidence: Math.max(c.confidence, candidate.confidence) } : c,
+          i === priorIndex
+            ? { ...c, confidence: Math.max(c.confidence, candidate.confidence) }
+            : c,
         )
       : [...existing.candidates, candidate];
 
   return touch(
-    { ...state, requiredInformation: { ...state.requiredInformation, [field]: resolveField(candidates) } },
+    {
+      ...state,
+      requiredInformation: {
+        ...state.requiredInformation,
+        [field]: resolveField(candidates),
+      },
+    },
     clock,
   );
 }
@@ -143,7 +174,9 @@ function resolveField(candidates: Candidate[]): FieldState {
   if (candidates.length === 0) return emptyField();
 
   const distinct = new Set(candidates.map((c) => c.value));
-  const best = candidates.reduce((a, b) => (b.confidence > a.confidence ? b : a));
+  const best = candidates.reduce((a, b) =>
+    b.confidence > a.confidence ? b : a,
+  );
 
   if (distinct.size === 1) {
     return {
@@ -161,7 +194,7 @@ function resolveField(candidates: Candidate[]): FieldState {
     confidence: round2(best.confidence / distinct.size),
     confirmed: false,
     // Shows the conflict on the dashboard: "4582 / 4852".
-    display: [...distinct].join(' / '),
+    display: [...distinct].join(" / "),
   };
 }
 
@@ -180,7 +213,10 @@ export function requestConfirmation(
     {
       ...state,
       pendingConfirmation: field,
-      attempts: { ...state.attempts, [field]: (state.attempts[field] ?? 0) + 1 },
+      attempts: {
+        ...state.attempts,
+        [field]: (state.attempts[field] ?? 0) + 1,
+      },
     },
     clock,
   );
@@ -203,7 +239,11 @@ export function applyConfirmation(
   const existing = state.requiredInformation[field] ?? emptyField();
 
   if (accepted) {
-    const value = confirmedValue?.trim() || existing.value || pickBest(existing)?.value || null;
+    const value =
+      confirmedValue?.trim() ||
+      existing.value ||
+      pickBest(existing)?.value ||
+      null;
     if (!value) return touch({ ...state, pendingConfirmation: null }, clock);
 
     return touch(
@@ -222,7 +262,7 @@ export function applyConfirmation(
           },
         },
         customer:
-          field === 'customerIdentity'
+          field === "customerIdentity"
             ? { ...state.customer, name: value, identityVerified: true }
             : state.customer,
         pendingConfirmation: null,
@@ -234,7 +274,10 @@ export function applyConfirmation(
   return touch(
     {
       ...state,
-      requiredInformation: { ...state.requiredInformation, [field]: emptyField() },
+      requiredInformation: {
+        ...state.requiredInformation,
+        [field]: emptyField(),
+      },
       pendingConfirmation: null,
     },
     clock,
@@ -243,14 +286,16 @@ export function applyConfirmation(
 
 function pickBest(field: FieldState): Candidate | null {
   if (field.candidates.length === 0) return null;
-  return field.candidates.reduce((a, b) => (b.confidence > a.confidence ? b : a));
+  return field.candidates.reduce((a, b) =>
+    b.confidence > a.confidence ? b : a,
+  );
 }
 
 // ── Question selection ────────────────────────────────────────────────────────
 
 export interface NextQuestion {
   field: FieldKey;
-  kind: 'ask' | 'confirm';
+  kind: "ask" | "confirm";
   /** What the LLM should convey. It phrases this in the caller's language. */
   intent: string;
   attempt: number;
@@ -273,8 +318,8 @@ export function nextQuestion(
     const current = state.requiredInformation[field];
     return {
       field,
-      kind: 'confirm',
-      intent: `Read back the ${label(field)} (${current?.display ?? 'unclear'}) and ask the caller to confirm it.`,
+      kind: "confirm",
+      intent: `Read back the ${label(field)} (${current?.display ?? "unclear"}) and ask the caller to confirm it.`,
       attempt: state.attempts[field] ?? 0,
     };
   }
@@ -287,15 +332,23 @@ export function nextQuestion(
 
     // Nothing heard yet — ask for it.
     if (!current || current.candidates.length === 0) {
-      return { field, kind: 'ask', intent: FIELD_DEFINITIONS[field].questionIntent, attempt };
+      return {
+        field,
+        kind: "ask",
+        intent: FIELD_DEFINITIONS[field].questionIntent,
+        attempt,
+      };
     }
 
     // Heard, but ambiguous or below its threshold — read it back.
-    if (current.value === null || current.confidence < thresholdFor(field, policy)) {
+    if (
+      current.value === null ||
+      current.confidence < thresholdFor(field, policy)
+    ) {
       return {
         field,
-        kind: 'confirm',
-        intent: `Read back the ${label(field)} (${current.display ?? 'unclear'}) and ask the caller to confirm.`,
+        kind: "confirm",
+        intent: `Read back the ${label(field)} (${current.display ?? "unclear"}) and ask the caller to confirm.`,
         attempt,
       };
     }
@@ -304,7 +357,7 @@ export function nextQuestion(
     if (isCritical(field)) {
       return {
         field,
-        kind: 'confirm',
+        kind: "confirm",
         intent: `Read back the ${label(field)} (${current.value}) and ask the caller to confirm.`,
         attempt,
       };
@@ -316,16 +369,16 @@ export function nextQuestion(
 
 function label(field: FieldKey): string {
   switch (field) {
-    case 'orderId':
-      return 'order number';
-    case 'customerIdentity':
-      return 'name on the order';
-    case 'cancellationReason':
-      return 'reason for cancelling';
-    case 'returnReason':
-      return 'reason for the return';
-    case 'refundReason':
-      return 'reason for the refund';
+    case "orderId":
+      return "order number";
+    case "customerIdentity":
+      return "name on the order";
+    case "cancellationReason":
+      return "reason for cancelling";
+    case "returnReason":
+      return "reason for the return";
+    case "refundReason":
+      return "reason for the refund";
     default:
       return field;
   }
@@ -378,7 +431,10 @@ export function recomputeConfidence(
   policy: PolicyConfig,
   clock: Clock = systemClock,
 ): ConversationState {
-  return touch({ ...state, confidence: { overall: overallConfidence(state, policy) } }, clock);
+  return touch(
+    { ...state, confidence: { overall: overallConfidence(state, policy) } },
+    clock,
+  );
 }
 
 /** Record that the caller asked for a human. Drives the retention ladder. */
@@ -404,7 +460,10 @@ export function noteExecutedAction(
   clock: Clock = systemClock,
 ): ConversationState {
   if (state.executedActions.includes(action)) return state;
-  return touch({ ...state, executedActions: [...state.executedActions, action] }, clock);
+  return touch(
+    { ...state, executedActions: [...state.executedActions, action] },
+    clock,
+  );
 }
 
 /** Record a status a real lookup returned, so the AI may state it. */
@@ -415,12 +474,18 @@ export function noteOrderStatus(
   clock: Clock = systemClock,
 ): ConversationState {
   return touch(
-    { ...state, knownOrderStatuses: { ...state.knownOrderStatuses, [orderId]: status } },
+    {
+      ...state,
+      knownOrderStatuses: { ...state.knownOrderStatuses, [orderId]: status },
+    },
     clock,
   );
 }
 
-export function advanceTurn(state: ConversationState, clock: Clock = systemClock): ConversationState {
+export function advanceTurn(
+  state: ConversationState,
+  clock: Clock = systemClock,
+): ConversationState {
   return touch({ ...state, turnCount: state.turnCount + 1 }, clock);
 }
 
@@ -432,22 +497,36 @@ export function isInformationComplete(state: ConversationState): boolean {
 }
 
 /** Split for the agent dashboard: what is trustworthy versus what is not. */
-export function partitionInformation(
-  state: ConversationState,
-): {
+export function partitionInformation(state: ConversationState): {
   verified: Array<{ field: FieldKey; value: string; confidence: number }>;
   unverified: Array<{ field: FieldKey; display: string; confidence: number }>;
 } {
-  const verified: Array<{ field: FieldKey; value: string; confidence: number }> = [];
-  const unverified: Array<{ field: FieldKey; display: string; confidence: number }> = [];
+  const verified: Array<{
+    field: FieldKey;
+    value: string;
+    confidence: number;
+  }> = [];
+  const unverified: Array<{
+    field: FieldKey;
+    display: string;
+    confidence: number;
+  }> = [];
 
   for (const [key, field] of Object.entries(state.requiredInformation) as Array<
     [FieldKey, FieldState]
   >) {
     if (field.confirmed && field.value) {
-      verified.push({ field: key, value: field.value, confidence: field.confidence });
+      verified.push({
+        field: key,
+        value: field.value,
+        confidence: field.confidence,
+      });
     } else if (field.candidates.length > 0) {
-      unverified.push({ field: key, display: field.display ?? '', confidence: field.confidence });
+      unverified.push({
+        field: key,
+        display: field.display ?? "",
+        confidence: field.confidence,
+      });
     }
   }
 

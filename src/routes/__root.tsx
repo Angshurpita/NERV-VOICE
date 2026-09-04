@@ -91,8 +91,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         { title: "Nerv — AI Voice Support Console" },
         {
           name: "description",
-          content:
-            "Operations console for the Nerv AI voice support line",
+          content: "Operations console for the Nerv AI voice support line",
         },
         { name: "color-scheme", content: "light dark" },
       ],

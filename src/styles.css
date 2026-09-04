@@ -132,7 +132,7 @@
    * Amber carries a sub-3:1 contrast warning against white, which is why charts
    * using it also carry direct labels rather than relying on the swatch alone.
    */
-  --chart-1: oklch(0.50 0.20 277);
+  --chart-1: oklch(0.5 0.2 277);
   --chart-2: oklch(0.62 0.14 190);
   --chart-3: oklch(0.46 0.15 320);
   --chart-4: oklch(0.72 0.14 85);
@@ -149,9 +149,12 @@
 
   /* Elevation. Neutral, tight, and cheap — no coloured or spread-heavy shadows. */
   --elev-xs: 0 1px 2px oklch(0.21 0.03 265 / 5%);
-  --elev-sm: 0 1px 2px oklch(0.21 0.03 265 / 6%), 0 1px 1px oklch(0.21 0.03 265 / 4%);
-  --elev-md: 0 2px 8px oklch(0.21 0.03 265 / 7%), 0 1px 2px oklch(0.21 0.03 265 / 5%);
-  --elev-lg: 0 12px 32px oklch(0.21 0.03 265 / 10%), 0 2px 6px oklch(0.21 0.03 265 / 5%);
+  --elev-sm:
+    0 1px 2px oklch(0.21 0.03 265 / 6%), 0 1px 1px oklch(0.21 0.03 265 / 4%);
+  --elev-md:
+    0 2px 8px oklch(0.21 0.03 265 / 7%), 0 1px 2px oklch(0.21 0.03 265 / 5%);
+  --elev-lg:
+    0 12px 32px oklch(0.21 0.03 265 / 10%), 0 2px 6px oklch(0.21 0.03 265 / 5%);
 
   /* One easing curve and three durations for the whole app. The old theme used
      0.4s and 0.6s springs, which is what made every interaction feel laggy. */
@@ -202,7 +205,7 @@
   --chart-2: oklch(0.63 0.13 190);
   --chart-3: oklch(0.58 0.15 320);
   --chart-4: oklch(0.66 0.14 85);
-  --chart-5: oklch(0.60 0.18 25);
+  --chart-5: oklch(0.6 0.18 25);
 
   --sidebar: oklch(0.205 0.013 265);
   --sidebar-foreground: oklch(0.95 0.004 265);
@@ -239,14 +242,20 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
-  h1, h2, h3, h4 {
+  h1,
+  h2,
+  h3,
+  h4 {
     font-family: var(--font-display);
     letter-spacing: -0.018em;
   }
 
   /* Tabular figures everywhere numbers change in place, so counters and tables
      do not jitter as digits update. */
-  .tnum, td, th, [data-slot="metric"] {
+  .tnum,
+  td,
+  th,
+  [data-slot="metric"] {
     font-variant-numeric: tabular-nums;
   }
 
@@ -270,7 +279,9 @@
 
 /* Honour the OS preference — the animations below are decoration, not meaning. */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
@@ -281,23 +292,43 @@
 /* ── Keyframes: transform and opacity only ──────────────────────────────── */
 
 @keyframes rise-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: none; }
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 @keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes ring-pulse {
-  0% { transform: scale(0.9); opacity: 0.5; }
-  100% { transform: scale(1.25); opacity: 0; }
+  0% {
+    transform: scale(0.9);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(1.25);
+    opacity: 0;
+  }
 }
 
 @keyframes shimmer {
-  from { transform: translateX(-100%); }
-  to { transform: translateX(100%); }
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
 }
 
 /* ── Utilities ──────────────────────────────────────────────────────────── */
@@ -305,15 +336,23 @@
 @utility scroll-thin {
   scrollbar-width: thin;
   scrollbar-color: var(--color-border) transparent;
-  &::-webkit-scrollbar { width: 8px; height: 8px; }
-  &::-webkit-scrollbar-track { background: transparent; }
+  &::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
   &::-webkit-scrollbar-thumb {
     background: var(--color-border);
     border-radius: 9999px;
     border: 2px solid transparent;
     background-clip: content-box;
   }
-  &::-webkit-scrollbar-thumb:hover { background: var(--color-input); background-clip: content-box; }
+  &::-webkit-scrollbar-thumb:hover {
+    background: var(--color-input);
+    background-clip: content-box;
+  }
 }
 
 @utility surface {
@@ -323,7 +362,9 @@
 }
 
 @utility surface-hover {
-  transition: box-shadow var(--dur) var(--ease), border-color var(--dur) var(--ease);
+  transition:
+    box-shadow var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
   &:hover {
     border-color: var(--color-input);
     box-shadow: var(--elev-md);
@@ -331,10 +372,15 @@
 }
 
 @utility interactive {
-  transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
-    border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease),
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease),
     transform var(--dur-fast) var(--ease);
-  &:active { transform: translateY(0.5px); }
+  &:active {
+    transform: translateY(0.5px);
+  }
 }
 
 @utility animate-rise {
@@ -360,24 +406,42 @@
     content: "";
     position: absolute;
     inset: 0;
-    background: linear-gradient(90deg, transparent, oklch(1 0 0 / 45%), transparent);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      oklch(1 0 0 / 45%),
+      transparent
+    );
     animation: shimmer 1.4s var(--ease) infinite;
   }
 }
 
 .dark .skeleton::after {
-  background: linear-gradient(90deg, transparent, oklch(1 0 0 / 7%), transparent);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    oklch(1 0 0 / 7%),
+    transparent
+  );
 }
 
 @utility text-gradient-brand {
-  background: linear-gradient(100deg, var(--color-foreground), oklch(0.45 0.16 277));
+  background: linear-gradient(
+    100deg,
+    var(--color-foreground),
+    oklch(0.45 0.16 277)
+  );
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
 }
 
 .dark .text-gradient-brand {
-  background: linear-gradient(100deg, var(--color-foreground), oklch(0.78 0.13 277));
+  background: linear-gradient(
+    100deg,
+    var(--color-foreground),
+    oklch(0.78 0.13 277)
+  );
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;

@@ -1,9 +1,9 @@
-import { Router } from 'express';
-import { z } from 'zod';
-import { getDatabase } from '@echosphere/db';
-import { endCall, handleTurn, startCall } from '../conversation.js';
-import { attachUser, requireRole, type AuthedRequest } from '../auth.js';
-import { config } from '../config.js';
+import { Router } from "express";
+import { z } from "zod";
+import { getDatabase } from "@echosphere/db";
+import { endCall, handleTurn, startCall } from "../conversation.js";
+import { attachUser, requireRole, type AuthedRequest } from "../auth.js";
+import { config } from "../config.js";
 
 /**
  * Call routes.
@@ -20,10 +20,10 @@ import { config } from '../config.js';
 
 const router = Router();
 
-router.post('/', async (req, res) => {
+router.post("/", async (req, res) => {
   const parsed = z
     .object({
-      language: z.enum(['en', 'hi']).optional(),
+      language: z.enum(["en", "hi"]).optional(),
       channelName: z.string().optional().nullable(),
       callerName: z.string().optional().nullable(),
       callerPhone: z.string().optional().nullable(),
@@ -31,23 +31,25 @@ router.post('/', async (req, res) => {
     .safeParse(req.body ?? {});
 
   if (!parsed.success) {
-    res.status(400).json({ error: 'Invalid call details' });
+    res.status(400).json({ error: "Invalid call details" });
     return;
   }
 
   res.status(201).json(await startCall(parsed.data));
 });
 
-router.post('/:id/turn', async (req, res) => {
+router.post("/:id/turn", async (req, res) => {
   const parsed = z
     .object({
-      text: z.string().min(1, 'Say something first').max(2000),
+      text: z.string().min(1, "Say something first").max(2000),
       asrConfidence: z.number().min(0).max(1).optional(),
     })
     .safeParse(req.body);
 
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid turn' });
+    res
+      .status(400)
+      .json({ error: parsed.error.issues[0]?.message ?? "Invalid turn" });
     return;
   }
 
@@ -57,8 +59,10 @@ router.post('/:id/turn', async (req, res) => {
     asrConfidence: parsed.data.asrConfidence,
   });
 
-  if ('error' in result) {
-    res.status(result.error === 'Call not found' ? 404 : 400).json({ error: result.error });
+  if ("error" in result) {
+    res
+      .status(result.error === "Call not found" ? 404 : 400)
+      .json({ error: result.error });
     return;
   }
 
@@ -78,37 +82,54 @@ router.post('/:id/turn', async (req, res) => {
   });
 });
 
-router.post('/:id/end', async (req, res) => {
+router.post("/:id/end", async (req, res) => {
   const call = await endCall(req.params.id!);
   if (!call) {
-    res.status(404).json({ error: 'Call not found' });
+    res.status(404).json({ error: "Call not found" });
     return;
   }
-  res.json({ ok: true, durationSeconds: call.durationSeconds, caseRef: call.caseRef });
+  res.json({
+    ok: true,
+    durationSeconds: call.durationSeconds,
+    caseRef: call.caseRef,
+  });
 });
 
-router.get('/by-channel/:channel', async (req, res) => {
+router.get("/by-channel/:channel", async (req, res) => {
   const db = await getDatabase(config.DATABASE_URL);
   const call = await db.calls.findByChannel(req.params.channel);
   if (!call) {
-    res.status(404).json({ error: 'Call not found' });
+    res.status(404).json({ error: "Call not found" });
     return;
   }
-  res.json({ callId: call.id, caseRef: call.caseRef, channelName: call.channelName });
+  res.json({
+    callId: call.id,
+    caseRef: call.caseRef,
+    channelName: call.channelName,
+  });
 });
 
 // ── Staff reads ───────────────────────────────────────────────────────────────
 
-router.get('/', attachUser, requireRole('agent'), async (req, res) => {
+router.get("/", attachUser, requireRole("agent"), async (req, res) => {
   const db = await getDatabase(config.DATABASE_URL);
-  const status = req.query.status as 'active' | 'completed' | 'escalated' | 'abandoned' | undefined;
-  const search = typeof req.query.search === 'string' ? req.query.search : undefined;
+  const status = req.query.status as
+    "active" | "completed" | "escalated" | "abandoned" | undefined;
+  const search =
+    typeof req.query.search === "string" ? req.query.search : undefined;
   const limit = Math.min(Number(req.query.limit ?? 50) || 50, 200);
   const offset = Number(req.query.offset ?? 0) || 0;
 
   const [calls, total] = await Promise.all([
-    db.calls.list({ status: status && status !== ('all' as never) ? status : undefined, search, limit, offset }),
-    db.calls.count(status && status !== ('all' as never) ? { status } : undefined),
+    db.calls.list({
+      status: status && status !== ("all" as never) ? status : undefined,
+      search,
+      limit,
+      offset,
+    }),
+    db.calls.count(
+      status && status !== ("all" as never) ? { status } : undefined,
+    ),
   ]);
 
   res.json({
@@ -119,21 +140,26 @@ router.get('/', attachUser, requireRole('agent'), async (req, res) => {
   });
 });
 
-router.get('/:id', attachUser, requireRole('agent'), async (req, res) => {
+router.get("/:id", attachUser, requireRole("agent"), async (req, res) => {
   const db = await getDatabase(config.DATABASE_URL);
   const call = await db.calls.findById(req.params.id!);
   if (!call) {
-    res.status(404).json({ error: 'Call not found' });
+    res.status(404).json({ error: "Call not found" });
     return;
   }
   const transcript = await db.transcripts.forCall(call.id);
   res.json({ call, transcript });
 });
 
-router.get('/:id/transcript', attachUser, requireRole('agent'), async (req, res) => {
-  const db = await getDatabase(config.DATABASE_URL);
-  res.json({ transcript: await db.transcripts.forCall(req.params.id!) });
-});
+router.get(
+  "/:id/transcript",
+  attachUser,
+  requireRole("agent"),
+  async (req, res) => {
+    const db = await getDatabase(config.DATABASE_URL);
+    res.json({ transcript: await db.transcripts.forCall(req.params.id!) });
+  },
+);
 
 /**
  * Live view for the console.
@@ -142,26 +168,31 @@ router.get('/:id/transcript', attachUser, requireRole('agent'), async (req, res)
  * would burn a function invocation for the duration of every call being watched —
  * for a dashboard, a 2-second poll is cheaper and materially simpler.
  */
-router.get('/:id/live', attachUser, requireRole('agent'), async (req: AuthedRequest, res) => {
-  const db = await getDatabase(config.DATABASE_URL);
-  const call = await db.calls.findById(req.params.id!);
-  if (!call) {
-    res.status(404).json({ error: 'Call not found' });
-    return;
-  }
-  const transcript = await db.transcripts.forCall(call.id);
-  res.json({
-    status: call.status,
-    intent: call.intent,
-    orderId: call.orderId,
-    confidence: call.confidenceOverall,
-    escalated: call.escalated,
-    escalationReason: call.escalationReason,
-    turnCount: call.turnCount,
-    humanRequestCount: call.humanRequestCount,
-    state: call.state,
-    transcript,
-  });
-});
+router.get(
+  "/:id/live",
+  attachUser,
+  requireRole("agent"),
+  async (req: AuthedRequest, res) => {
+    const db = await getDatabase(config.DATABASE_URL);
+    const call = await db.calls.findById(req.params.id!);
+    if (!call) {
+      res.status(404).json({ error: "Call not found" });
+      return;
+    }
+    const transcript = await db.transcripts.forCall(call.id);
+    res.json({
+      status: call.status,
+      intent: call.intent,
+      orderId: call.orderId,
+      confidence: call.confidenceOverall,
+      escalated: call.escalated,
+      escalationReason: call.escalationReason,
+      turnCount: call.turnCount,
+      humanRequestCount: call.humanRequestCount,
+      state: call.state,
+      transcript,
+    });
+  },
+);
 
 export default router;

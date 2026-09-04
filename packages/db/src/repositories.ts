@@ -6,9 +6,15 @@ import type {
   Order,
   OrderLookupResult,
   VerificationReport,
-} from '@echosphere/core';
-import { CUSTOMERS, findCustomer, findOrder, ORDERS, OUTAGE_ORDER_IDS } from './catalogue.js';
-import { cryptoRandomId, type Store, type Where } from './store.js';
+} from "@echosphere/core";
+import {
+  CUSTOMERS,
+  findCustomer,
+  findOrder,
+  ORDERS,
+  OUTAGE_ORDER_IDS,
+} from "./catalogue.js";
+import { cryptoRandomId, type Store, type Where } from "./store.js";
 import {
   TABLES,
   type AnalyticsOverview,
@@ -27,7 +33,7 @@ import {
   type TranscriptRow,
   type TrendPoint,
   type UserRow,
-} from './types.js';
+} from "./types.js";
 
 /**
  * Repositories.
@@ -65,35 +71,42 @@ export class OrderRepository {
     const id = orderId.trim();
 
     if (OUTAGE_ORDER_IDS.has(id)) {
-      return { outcome: 'backend_unavailable', orderId: id };
+      return { outcome: "backend_unavailable", orderId: id };
     }
 
     const base = findOrder(id);
-    if (!base) return { outcome: 'not_found', orderId: id };
+    if (!base) return { outcome: "not_found", orderId: id };
 
     const order = { ...base, ...this.overrides.get(base.id) };
     const customer = findCustomer(order.customerId);
-    if (!customer) return { outcome: 'not_found', orderId: id };
+    if (!customer) return { outcome: "not_found", orderId: id };
 
-    return { outcome: 'found', order, customer };
+    return { outcome: "found", order, customer };
   }
 
   async cancel(orderId: string): Promise<boolean> {
     const result = await this.lookup(orderId);
-    if (result.outcome !== 'found') return false;
+    if (result.outcome !== "found") return false;
 
     this.overrides.set(result.order.id, {
-      status: 'CANCELLED',
+      status: "CANCELLED",
       cancelledAt: now().slice(0, 10),
       history: [
         ...result.order.history,
-        { status: 'CANCELLED', at: now().slice(0, 10), note: 'Cancelled by AI agent on caller request' },
+        {
+          status: "CANCELLED",
+          at: now().slice(0, 10),
+          note: "Cancelled by AI agent on caller request",
+        },
       ],
     });
 
     if (this.store.supportsRaw()) {
       await this.store
-        .raw(`UPDATE orders SET status = $1, cancelled_at = now() WHERE id = $2`, ['CANCELLED', result.order.id])
+        .raw(
+          `UPDATE orders SET status = $1, cancelled_at = now() WHERE id = $2`,
+          ["CANCELLED", result.order.id],
+        )
         .catch(() => []);
     }
     return true;
@@ -118,7 +131,7 @@ export class UserRepository {
     passwordHash: string;
     fullName: string;
     phone?: string | null;
-    role?: UserRow['role'];
+    role?: UserRow["role"];
   }): Promise<UserRow> {
     return this.store.insert<UserRow>(TABLES.users, {
       id: cryptoRandomId(),
@@ -126,11 +139,11 @@ export class UserRepository {
       passwordHash: input.passwordHash,
       fullName: input.fullName.trim(),
       phone: input.phone ?? null,
-      role: input.role ?? 'agent',
+      role: input.role ?? "agent",
       avatarColor: pickAvatarColor(input.email),
-      locale: 'en',
-      theme: 'light',
-      density: 'comfortable',
+      locale: "en",
+      theme: "light",
+      density: "comfortable",
       notifyEscalations: true,
       notifyDigest: false,
       isActive: true,
@@ -162,7 +175,7 @@ export class UserRepository {
 
   async list(): Promise<UserRow[]> {
     return this.store.findMany<UserRow>(TABLES.users, undefined, {
-      orderBy: { column: 'createdAt', direction: 'asc' },
+      orderBy: { column: "createdAt", direction: "asc" },
     });
   }
 
@@ -171,7 +184,16 @@ export class UserRepository {
   }
 }
 
-const AVATAR_COLORS = ['indigo', 'emerald', 'amber', 'rose', 'sky', 'violet', 'teal', 'orange'];
+const AVATAR_COLORS = [
+  "indigo",
+  "emerald",
+  "amber",
+  "rose",
+  "sky",
+  "violet",
+  "teal",
+  "orange",
+];
 
 function pickAvatarColor(seed: string): string {
   let h = 0;
@@ -215,7 +237,11 @@ export class SessionRepository {
   }
 
   async findByTokenHash(tokenHash: string): Promise<SessionRow | null> {
-    const rows = await this.store.findMany<SessionRow>(TABLES.sessions, { tokenHash }, { limit: 1 });
+    const rows = await this.store.findMany<SessionRow>(
+      TABLES.sessions,
+      { tokenHash },
+      { limit: 1 },
+    );
     const session = rows[0];
     if (!session) return null;
     if (session.revokedAt) return null;
@@ -224,18 +250,28 @@ export class SessionRepository {
   }
 
   async touch(id: string): Promise<void> {
-    await this.store.update<SessionRow>(TABLES.sessions, id, { lastSeenAt: now() });
+    await this.store.update<SessionRow>(TABLES.sessions, id, {
+      lastSeenAt: now(),
+    });
   }
 
   async listActive(userId: string): Promise<SessionRow[]> {
-    const rows = await this.store.findMany<SessionRow>(TABLES.sessions, { userId }, {
-      orderBy: { column: 'lastSeenAt', direction: 'desc' },
-    });
-    return rows.filter((s) => !s.revokedAt && new Date(s.expiresAt).getTime() > Date.now());
+    const rows = await this.store.findMany<SessionRow>(
+      TABLES.sessions,
+      { userId },
+      {
+        orderBy: { column: "lastSeenAt", direction: "desc" },
+      },
+    );
+    return rows.filter(
+      (s) => !s.revokedAt && new Date(s.expiresAt).getTime() > Date.now(),
+    );
   }
 
   async revoke(id: string): Promise<boolean> {
-    const updated = await this.store.update<SessionRow>(TABLES.sessions, id, { revokedAt: now() });
+    const updated = await this.store.update<SessionRow>(TABLES.sessions, id, {
+      revokedAt: now(),
+    });
     return updated !== null;
   }
 
@@ -263,7 +299,7 @@ export class SessionRepository {
 async function nextCaseRef(store: Store, table: string): Promise<string> {
   const year = new Date().getFullYear();
   const total = await store.count(table);
-  return `ECH-${year}-${String(total + 1).padStart(6, '0')}`;
+  return `ECH-${year}-${String(total + 1).padStart(6, "0")}`;
 }
 
 // ── Calls ─────────────────────────────────────────────────────────────────────
@@ -289,7 +325,7 @@ export class CallRepository {
       agentRtcUid: null,
       language: input.language,
       codeSwitched: false,
-      status: 'active',
+      status: "active",
       intent: null,
       orderId: null,
       confidenceOverall: 0,
@@ -313,29 +349,42 @@ export class CallRepository {
     const rows = await this.store.findMany<CallRow>(
       TABLES.calls,
       { channelName },
-      { limit: 1, orderBy: { column: 'startedAt', direction: 'desc' } },
+      { limit: 1, orderBy: { column: "startedAt", direction: "desc" } },
     );
     return rows[0] ?? null;
   }
 
-  async updateAgent(id: string, agentId: string, agentRtcUid: number): Promise<CallRow | null> {
+  async updateAgent(
+    id: string,
+    agentId: string,
+    agentRtcUid: number,
+  ): Promise<CallRow | null> {
     return this.store.update<CallRow>(TABLES.calls, id, {
       agentId,
       agentRtcUid,
     });
   }
 
-  async updateChannel(id: string, channelName: string): Promise<CallRow | null> {
+  async updateChannel(
+    id: string,
+    channelName: string,
+  ): Promise<CallRow | null> {
     return this.store.update<CallRow>(TABLES.calls, id, {
       channelName,
     });
   }
 
   /** Persist the engine state plus the denormalised columns the dashboard reads. */
-  async syncFromState(id: string, state: ConversationState): Promise<CallRow | null> {
+  async syncFromState(
+    id: string,
+    state: ConversationState,
+  ): Promise<CallRow | null> {
     return this.store.update<CallRow>(TABLES.calls, id, {
       state: state as unknown,
-      intent: state.intent.value === 'unknown' ? null : (state.intent.value as IntentKey),
+      intent:
+        state.intent.value === "unknown"
+          ? null
+          : (state.intent.value as IntentKey),
       orderId: state.verification.orderId,
       customerId: state.customer.id,
       callerName: state.verification.ordererName ?? state.customer.name,
@@ -346,11 +395,14 @@ export class CallRepository {
       turnCount: state.turnCount,
       escalated: state.escalation.required,
       escalationReason: state.escalation.reason,
-      status: state.escalation.required ? 'escalated' : 'active',
+      status: state.escalation.required ? "escalated" : "active",
     });
   }
 
-  async end(id: string, resolvedBy: CallRow['resolvedBy']): Promise<CallRow | null> {
+  async end(
+    id: string,
+    resolvedBy: CallRow["resolvedBy"],
+  ): Promise<CallRow | null> {
     const call = await this.findById(id);
     if (!call) return null;
     const ended = new Date();
@@ -359,19 +411,26 @@ export class CallRepository {
       Math.round((ended.getTime() - new Date(call.startedAt).getTime()) / 1000),
     );
     return this.store.update<CallRow>(TABLES.calls, id, {
-      status: call.escalated ? 'escalated' : 'completed',
+      status: call.escalated ? "escalated" : "completed",
       endedAt: ended.toISOString(),
       durationSeconds: duration,
-      resolvedBy: resolvedBy ?? (call.escalated ? 'human' : 'ai'),
+      resolvedBy: resolvedBy ?? (call.escalated ? "human" : "ai"),
     });
   }
 
-  async list(filter: { status?: CallStatus; search?: string; limit?: number; offset?: number } = {}) {
+  async list(
+    filter: {
+      status?: CallStatus;
+      search?: string;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ) {
     const where: Where = {};
     if (filter.status) (where as Record<string, string>).status = filter.status;
 
     const rows = await this.store.findMany<CallRow>(TABLES.calls, where, {
-      orderBy: { column: 'startedAt', direction: 'desc' },
+      orderBy: { column: "startedAt", direction: "desc" },
       limit: filter.limit ?? 50,
       offset: filter.offset ?? 0,
     });
@@ -381,8 +440,8 @@ export class CallRepository {
     return rows.filter(
       (r) =>
         r.caseRef.toLowerCase().includes(search) ||
-        (r.callerName ?? '').toLowerCase().includes(search) ||
-        (r.orderId ?? '').toLowerCase().includes(search),
+        (r.callerName ?? "").toLowerCase().includes(search) ||
+        (r.orderId ?? "").toLowerCase().includes(search),
     );
   }
 
@@ -402,12 +461,14 @@ export class TranscriptRepository {
 
   async append(input: {
     callId: string;
-    speaker: TranscriptRow['speaker'];
+    speaker: TranscriptRow["speaker"];
     text: string;
     language: LanguageCode;
     confidence?: number;
   }): Promise<TranscriptRow> {
-    const existing = await this.store.count(TABLES.transcripts, { callId: input.callId });
+    const existing = await this.store.count(TABLES.transcripts, {
+      callId: input.callId,
+    });
     return this.store.insert<TranscriptRow>(TABLES.transcripts, {
       id: cryptoRandomId(),
       callId: input.callId,
@@ -421,9 +482,13 @@ export class TranscriptRepository {
   }
 
   async forCall(callId: string): Promise<TranscriptRow[]> {
-    return this.store.findMany<TranscriptRow>(TABLES.transcripts, { callId }, {
-      orderBy: { column: 'seq', direction: 'asc' },
-    });
+    return this.store.findMany<TranscriptRow>(
+      TABLES.transcripts,
+      { callId },
+      {
+        orderBy: { column: "seq", direction: "asc" },
+      },
+    );
   }
 }
 
@@ -431,18 +496,23 @@ export class TranscriptRepository {
 
 /** Transitions a ticket is allowed to make. Anything else is rejected. */
 const TICKET_TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
-  open: ['in_progress', 'waiting_customer', 'resolved', 'closed'],
-  in_progress: ['waiting_customer', 'resolved', 'open'],
-  waiting_customer: ['in_progress', 'resolved', 'closed'],
-  resolved: ['closed', 'in_progress'],
-  closed: ['in_progress'],
+  open: ["in_progress", "waiting_customer", "resolved", "closed"],
+  in_progress: ["waiting_customer", "resolved", "open"],
+  waiting_customer: ["in_progress", "resolved", "closed"],
+  resolved: ["closed", "in_progress"],
+  closed: ["in_progress"],
 };
 
 export function canTransition(from: TicketStatus, to: TicketStatus): boolean {
   return from === to || (TICKET_TRANSITIONS[from] ?? []).includes(to);
 }
 
-const SLA_HOURS: Record<TicketPriority, number> = { urgent: 2, high: 8, medium: 24, low: 72 };
+const SLA_HOURS: Record<TicketPriority, number> = {
+  urgent: 2,
+  high: 8,
+  medium: 24,
+  low: 72,
+};
 
 export class TicketRepository {
   constructor(private readonly store: Store) {}
@@ -471,7 +541,7 @@ export class TicketRepository {
       subject: input.subject,
       description: input.description,
       category: input.category,
-      status: 'open',
+      status: "open",
       priority: input.priority,
       assigneeId: null,
       assigneeName: null,
@@ -485,8 +555,8 @@ export class TicketRepository {
 
     await this.addEvent(ticket.id, {
       actorId: null,
-      actorName: input.actorName ?? 'AI agent',
-      kind: 'created',
+      actorName: input.actorName ?? "AI agent",
+      kind: "created",
       body: input.description,
     });
 
@@ -498,25 +568,31 @@ export class TicketRepository {
   }
 
   async findByCallId(callId: string): Promise<TicketRow | null> {
-    const rows = await this.store.findMany<TicketRow>(TABLES.tickets, { callId }, { limit: 1 });
+    const rows = await this.store.findMany<TicketRow>(
+      TABLES.tickets,
+      { callId },
+      { limit: 1 },
+    );
     return rows[0] ?? null;
   }
 
-  async list(filter: {
-    status?: TicketStatus;
-    priority?: TicketPriority;
-    assigneeId?: string;
-    search?: string;
-    limit?: number;
-    offset?: number;
-  } = {}) {
+  async list(
+    filter: {
+      status?: TicketStatus;
+      priority?: TicketPriority;
+      assigneeId?: string;
+      search?: string;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ) {
     const where: Record<string, string> = {};
     if (filter.status) where.status = filter.status;
     if (filter.priority) where.priority = filter.priority;
     if (filter.assigneeId) where.assigneeId = filter.assigneeId;
 
     const rows = await this.store.findMany<TicketRow>(TABLES.tickets, where, {
-      orderBy: { column: 'updatedAt', direction: 'desc' },
+      orderBy: { column: "updatedAt", direction: "desc" },
       limit: filter.limit ?? 100,
       offset: filter.offset ?? 0,
     });
@@ -528,7 +604,7 @@ export class TicketRepository {
         t.caseRef.toLowerCase().includes(search) ||
         t.customerName.toLowerCase().includes(search) ||
         t.subject.toLowerCase().includes(search) ||
-        (t.orderId ?? '').toLowerCase().includes(search),
+        (t.orderId ?? "").toLowerCase().includes(search),
     );
   }
 
@@ -550,9 +626,9 @@ export class TicketRepository {
     actor: { id: string | null; name: string },
   ): Promise<{ ok: true; ticket: TicketRow } | { ok: false; error: string }> {
     const existing = await this.findById(id);
-    if (!existing) return { ok: false, error: 'Ticket not found' };
+    if (!existing) return { ok: false, error: "Ticket not found" };
 
-    const events: Array<Parameters<TicketRepository['addEvent']>[1]> = [];
+    const events: Array<Parameters<TicketRepository["addEvent"]>[1]> = [];
     const update: Partial<TicketRow> = { updatedAt: now() };
 
     if (patch.status && patch.status !== existing.status) {
@@ -562,20 +638,31 @@ export class TicketRepository {
           error: `Cannot move a ticket from ${existing.status} to ${patch.status}.`,
         };
       }
-      if (patch.status === 'resolved' && !(patch.resolution ?? existing.resolution)) {
-        return { ok: false, error: 'A resolution note is required before resolving a ticket.' };
+      if (
+        patch.status === "resolved" &&
+        !(patch.resolution ?? existing.resolution)
+      ) {
+        return {
+          ok: false,
+          error: "A resolution note is required before resolving a ticket.",
+        };
       }
       update.status = patch.status;
-      if (patch.status === 'resolved') update.resolvedAt = now();
-      if (patch.status === 'closed') update.closedAt = now();
-      if (patch.status === 'in_progress') {
+      if (patch.status === "resolved") update.resolvedAt = now();
+      if (patch.status === "closed") update.closedAt = now();
+      if (patch.status === "in_progress") {
         update.resolvedAt = null;
         update.closedAt = null;
       }
       events.push({
         actorId: actor.id,
         actorName: actor.name,
-        kind: patch.status === 'resolved' ? 'resolved' : patch.status === 'in_progress' && existing.status === 'closed' ? 'reopened' : 'status_changed',
+        kind:
+          patch.status === "resolved"
+            ? "resolved"
+            : patch.status === "in_progress" && existing.status === "closed"
+              ? "reopened"
+              : "status_changed",
         fromValue: existing.status,
         toValue: patch.status,
       });
@@ -589,30 +676,40 @@ export class TicketRepository {
       events.push({
         actorId: actor.id,
         actorName: actor.name,
-        kind: 'priority_changed',
+        kind: "priority_changed",
         fromValue: existing.priority,
         toValue: patch.priority,
       });
     }
 
-    if (patch.assigneeId !== undefined && patch.assigneeId !== existing.assigneeId) {
+    if (
+      patch.assigneeId !== undefined &&
+      patch.assigneeId !== existing.assigneeId
+    ) {
       update.assigneeId = patch.assigneeId;
       update.assigneeName = patch.assigneeName ?? null;
       events.push({
         actorId: actor.id,
         actorName: actor.name,
-        kind: 'assigned',
+        kind: "assigned",
         fromValue: existing.assigneeName,
-        toValue: patch.assigneeName ?? 'Unassigned',
+        toValue: patch.assigneeName ?? "Unassigned",
       });
     }
 
-    if (patch.resolution !== undefined && patch.resolution !== existing.resolution) {
+    if (
+      patch.resolution !== undefined &&
+      patch.resolution !== existing.resolution
+    ) {
       update.resolution = patch.resolution;
     }
 
-    const ticket = await this.store.update<TicketRow>(TABLES.tickets, id, update);
-    if (!ticket) return { ok: false, error: 'Ticket not found' };
+    const ticket = await this.store.update<TicketRow>(
+      TABLES.tickets,
+      id,
+      update,
+    );
+    if (!ticket) return { ok: false, error: "Ticket not found" };
 
     for (const event of events) await this.addEvent(id, event);
     return { ok: true, ticket };
@@ -643,9 +740,13 @@ export class TicketRepository {
   }
 
   async events(ticketId: string): Promise<TicketEventRow[]> {
-    return this.store.findMany<TicketEventRow>(TABLES.ticketEvents, { ticketId }, {
-      orderBy: { column: 'at', direction: 'asc' },
-    });
+    return this.store.findMany<TicketEventRow>(
+      TABLES.ticketEvents,
+      { ticketId },
+      {
+        orderBy: { column: "at", direction: "asc" },
+      },
+    );
   }
 
   all(): Promise<TicketRow[]> {
@@ -687,7 +788,7 @@ export class EscalationRepository {
       report: input.report,
       aiSummary: input.aiSummary,
       language: input.language,
-      status: 'pending',
+      status: "pending",
       priority: input.priority,
       assigneeId: null,
       assigneeName: null,
@@ -702,17 +803,20 @@ export class EscalationRepository {
     return this.store.findById<EscalationRow>(TABLES.escalations, id);
   }
 
-  async list(status?: EscalationRow['status']): Promise<EscalationRow[]> {
+  async list(status?: EscalationRow["status"]): Promise<EscalationRow[]> {
     return this.store.findMany<EscalationRow>(
       TABLES.escalations,
       status ? { status } : undefined,
-      { orderBy: { column: 'createdAt', direction: 'desc' } },
+      { orderBy: { column: "createdAt", direction: "desc" } },
     );
   }
 
-  accept(id: string, agent: { id: string; name: string }): Promise<EscalationRow | null> {
+  accept(
+    id: string,
+    agent: { id: string; name: string },
+  ): Promise<EscalationRow | null> {
     return this.store.update<EscalationRow>(TABLES.escalations, id, {
-      status: 'accepted',
+      status: "accepted",
       assigneeId: agent.id,
       assigneeName: agent.name,
       acceptedAt: now(),
@@ -721,7 +825,7 @@ export class EscalationRepository {
 
   resolve(id: string): Promise<EscalationRow | null> {
     return this.store.update<EscalationRow>(TABLES.escalations, id, {
-      status: 'resolved',
+      status: "resolved",
       resolvedAt: now(),
     });
   }
@@ -752,12 +856,17 @@ export class AnalyticsRepository {
   ) {}
 
   async overview(): Promise<AnalyticsOverview> {
-    const [calls, tickets] = await Promise.all([this.calls.all(), this.tickets.all()]);
+    const [calls, tickets] = await Promise.all([
+      this.calls.all(),
+      this.tickets.all(),
+    ]);
 
     const finished = calls.filter((c) => c.endedAt !== null);
-    const aiResolved = calls.filter((c) => c.resolvedBy === 'ai').length;
+    const aiResolved = calls.filter((c) => c.resolvedBy === "ai").length;
     const escalated = calls.filter((c) => c.escalated).length;
-    const durations = finished.map((c) => c.durationSeconds ?? 0).filter((d) => d > 0);
+    const durations = finished
+      .map((c) => c.durationSeconds ?? 0)
+      .filter((d) => d > 0);
 
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
@@ -767,16 +876,22 @@ export class AnalyticsRepository {
 
     const resolutionHours = tickets
       .filter((t) => t.resolvedAt)
-      .map((t) => (new Date(t.resolvedAt!).getTime() - new Date(t.createdAt).getTime()) / 3_600_000);
+      .map(
+        (t) =>
+          (new Date(t.resolvedAt!).getTime() -
+            new Date(t.createdAt).getTime()) /
+          3_600_000,
+      );
 
     return {
       totalCalls: calls.length,
-      activeCalls: calls.filter((c) => c.status === 'active').length,
+      activeCalls: calls.filter((c) => c.status === "active").length,
       aiResolvedPercent: pct(aiResolved, calls.length),
       escalatedPercent: pct(escalated, calls.length),
       avgHandleSeconds: Math.round(mean(durations)),
-      openTickets: tickets.filter((t) => t.status === 'open').length,
-      inProgressTickets: tickets.filter((t) => t.status === 'in_progress').length,
+      openTickets: tickets.filter((t) => t.status === "open").length,
+      inProgressTickets: tickets.filter((t) => t.status === "in_progress")
+        .length,
       resolvedToday,
       avgResolutionHours: round1(mean(resolutionHours)),
       containmentRate: pct(calls.length - escalated, calls.length),
@@ -791,7 +906,13 @@ export class AnalyticsRepository {
       const d = new Date();
       d.setDate(d.getDate() - i);
       const key = d.toISOString().slice(0, 10);
-      buckets.set(key, { date: key, total: 0, aiResolved: 0, humanResolved: 0, escalated: 0 });
+      buckets.set(key, {
+        date: key,
+        total: 0,
+        aiResolved: 0,
+        humanResolved: 0,
+        escalated: 0,
+      });
     }
 
     for (const call of calls) {
@@ -800,8 +921,8 @@ export class AnalyticsRepository {
       if (!bucket) continue;
       bucket.total++;
       if (call.escalated) bucket.escalated++;
-      if (call.resolvedBy === 'ai') bucket.aiResolved++;
-      if (call.resolvedBy === 'human') bucket.humanResolved++;
+      if (call.resolvedBy === "ai") bucket.aiResolved++;
+      if (call.resolvedBy === "human") bucket.humanResolved++;
     }
 
     return [...buckets.values()];
@@ -809,7 +930,9 @@ export class AnalyticsRepository {
 
   async topIntents(): Promise<Breakdown[]> {
     const calls = await this.calls.all();
-    return tally(calls.map((c) => c.intent).filter((i): i is IntentKey => Boolean(i)));
+    return tally(
+      calls.map((c) => c.intent).filter((i): i is IntentKey => Boolean(i)),
+    );
   }
 
   async escalationReasons(): Promise<Breakdown[]> {
@@ -819,10 +942,10 @@ export class AnalyticsRepository {
 
   async languageMix(): Promise<Breakdown[]> {
     const calls = await this.calls.all();
-    const mix = { Hindi: 0, English: 0, 'Code-switched': 0 };
+    const mix = { Hindi: 0, English: 0, "Code-switched": 0 };
     for (const call of calls) {
-      if (call.codeSwitched) mix['Code-switched']++;
-      else if (call.language === 'hi') mix.Hindi++;
+      if (call.codeSwitched) mix["Code-switched"]++;
+      else if (call.language === "hi") mix.Hindi++;
       else mix.English++;
     }
     return Object.entries(mix)
@@ -844,7 +967,9 @@ function pct(part: number, total: number): number {
 }
 
 function mean(values: number[]): number {
-  return values.length === 0 ? 0 : values.reduce((a, b) => a + b, 0) / values.length;
+  return values.length === 0
+    ? 0
+    : values.reduce((a, b) => a + b, 0) / values.length;
 }
 
 function round1(value: number): number {

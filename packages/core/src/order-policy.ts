@@ -1,5 +1,5 @@
-import type { PolicyConfig } from './config.js';
-import type { Order, OrderStatus, ReturnPolicyClass } from './types.js';
+import type { PolicyConfig } from "./config.js";
+import type { Order, OrderStatus, ReturnPolicyClass } from "./types.js";
 
 /**
  * Commerce policy.
@@ -21,48 +21,51 @@ import type { Order, OrderStatus, ReturnPolicyClass } from './types.js';
  * it for today's delivery, that is no longer true.
  */
 const AI_CANCELLABLE: ReadonlySet<OrderStatus> = new Set<OrderStatus>([
-  'PLACED',
-  'PACKED',
-  'SHIPPED',
-  'IN_TRANSIT',
-  'DELAYED',
+  "PLACED",
+  "PACKED",
+  "SHIPPED",
+  "IN_TRANSIT",
+  "DELAYED",
 ]);
 
 /** Statuses where cancelling needs a person — requirement 6.3. */
 const CANCEL_NEEDS_HUMAN: ReadonlySet<OrderStatus> = new Set<OrderStatus>([
-  'OUT_FOR_DELIVERY',
-  'DELIVERED',
+  "OUT_FOR_DELIVERY",
+  "DELIVERED",
 ]);
 
 /** Statuses where there is nothing left to cancel. */
 const NOT_CANCELLABLE: ReadonlySet<OrderStatus> = new Set<OrderStatus>([
-  'CANCELLED',
-  'RETURNED',
-  'REFUNDED',
-  'REFUND_PENDING',
-  'RETURN_REQUESTED',
-  'RETURN_PICKED_UP',
-  'RTO',
-  'LOST_IN_TRANSIT',
+  "CANCELLED",
+  "RETURNED",
+  "REFUNDED",
+  "REFUND_PENDING",
+  "RETURN_REQUESTED",
+  "RETURN_PICKED_UP",
+  "RTO",
+  "LOST_IN_TRANSIT",
 ]);
 
 export type CancellationVerdict =
   /** The AI may cancel it now. */
-  | { outcome: 'ai_may_cancel'; findings: string[] }
+  | { outcome: "ai_may_cancel"; findings: string[] }
   /** Requirement 6.3 — hand to a human, with a reason. */
-  | { outcome: 'needs_human'; reason: string; findings: string[] }
+  | { outcome: "needs_human"; reason: string; findings: string[] }
   /** Nothing to do; explain why. */
-  | { outcome: 'not_possible'; reason: string; findings: string[] };
+  | { outcome: "not_possible"; reason: string; findings: string[] };
 
-export function evaluateCancellation(order: Order, policy: PolicyConfig): CancellationVerdict {
+export function evaluateCancellation(
+  order: Order,
+  policy: PolicyConfig,
+): CancellationVerdict {
   const findings: string[] = [
     `Order ${order.id} status is ${order.status}.`,
-    `Order value ₹${order.totalInr.toLocaleString('en-IN')}, paid by ${paymentLabel(order.paymentMethod)}.`,
+    `Order value ₹${order.totalInr.toLocaleString("en-IN")}, paid by ${paymentLabel(order.paymentMethod)}.`,
   ];
 
   if (NOT_CANCELLABLE.has(order.status)) {
     return {
-      outcome: 'not_possible',
+      outcome: "not_possible",
       reason: reasonNotCancellable(order.status),
       findings,
     };
@@ -70,28 +73,28 @@ export function evaluateCancellation(order: Order, policy: PolicyConfig): Cancel
 
   if (CANCEL_NEEDS_HUMAN.has(order.status)) {
     const reason =
-      order.status === 'OUT_FOR_DELIVERY'
+      order.status === "OUT_FOR_DELIVERY"
         ? `Order ${order.id} is out for delivery today, so cancelling means intercepting a parcel already with the courier. A human agent must authorise this.`
         : `Order ${order.id} has already been delivered, so this is a return rather than a cancellation and needs a human agent.`;
     findings.push(
-      order.status === 'OUT_FOR_DELIVERY'
-        ? `Courier ${order.courier ?? 'unknown'}, tracking ${order.trackingId ?? 'unavailable'}.`
-        : `Delivered on ${order.deliveredAt ?? 'unknown date'}.`,
+      order.status === "OUT_FOR_DELIVERY"
+        ? `Courier ${order.courier ?? "unknown"}, tracking ${order.trackingId ?? "unavailable"}.`
+        : `Delivered on ${order.deliveredAt ?? "unknown date"}.`,
     );
-    return { outcome: 'needs_human', reason, findings };
+    return { outcome: "needs_human", reason, findings };
   }
 
   if (AI_CANCELLABLE.has(order.status)) {
     if (order.totalInr >= policy.highValueInr) {
       findings.push(
-        `High-value order (≥ ₹${policy.highValueInr.toLocaleString('en-IN')}) — flagged for review, but cancellation itself is permitted at this stage.`,
+        `High-value order (≥ ₹${policy.highValueInr.toLocaleString("en-IN")}) — flagged for review, but cancellation itself is permitted at this stage.`,
       );
     }
-    return { outcome: 'ai_may_cancel', findings };
+    return { outcome: "ai_may_cancel", findings };
   }
 
   return {
-    outcome: 'needs_human',
+    outcome: "needs_human",
     reason: `Order ${order.id} is in state ${order.status}, which has no automated cancellation path.`,
     findings,
   };
@@ -99,23 +102,23 @@ export function evaluateCancellation(order: Order, policy: PolicyConfig): Cancel
 
 function reasonNotCancellable(status: OrderStatus): string {
   switch (status) {
-    case 'CANCELLED':
-      return 'This order is already cancelled.';
-    case 'REFUNDED':
-      return 'This order has already been refunded.';
-    case 'REFUND_PENDING':
-      return 'A refund is already being processed for this order.';
-    case 'RETURNED':
-      return 'This order has already been returned.';
-    case 'RETURN_REQUESTED':
-    case 'RETURN_PICKED_UP':
-      return 'A return is already in progress for this order.';
-    case 'RTO':
-      return 'This order was already returned to origin.';
-    case 'LOST_IN_TRANSIT':
-      return 'This order is marked lost in transit and is being handled as a claim.';
+    case "CANCELLED":
+      return "This order is already cancelled.";
+    case "REFUNDED":
+      return "This order has already been refunded.";
+    case "REFUND_PENDING":
+      return "A refund is already being processed for this order.";
+    case "RETURNED":
+      return "This order has already been returned.";
+    case "RETURN_REQUESTED":
+    case "RETURN_PICKED_UP":
+      return "A return is already in progress for this order.";
+    case "RTO":
+      return "This order was already returned to origin.";
+    case "LOST_IN_TRANSIT":
+      return "This order is marked lost in transit and is being handled as a claim.";
     default:
-      return 'This order cannot be cancelled.';
+      return "This order cannot be cancelled.";
   }
 }
 
@@ -137,28 +140,38 @@ export interface ReturnAssessment {
  * to a human. What it does is establish the facts *before* the handover, so the
  * agent receives a verified case rather than "caller wants a refund".
  */
-export function assessReturn(order: Order, now: Date = new Date()): ReturnAssessment {
+export function assessReturn(
+  order: Order,
+  now: Date = new Date(),
+): ReturnAssessment {
   const findings: string[] = [
     `Order ${order.id} status is ${order.status}.`,
-    `Order value ₹${order.totalInr.toLocaleString('en-IN')}, paid by ${paymentLabel(order.paymentMethod)}.`,
+    `Order value ₹${order.totalInr.toLocaleString("en-IN")}, paid by ${paymentLabel(order.paymentMethod)}.`,
   ];
 
-  if (order.status === 'REFUNDED') {
-    findings.push(`Already refunded on ${order.refundedAt ?? 'an earlier date'} — possible duplicate request.`);
+  if (order.status === "REFUNDED") {
+    findings.push(
+      `Already refunded on ${order.refundedAt ?? "an earlier date"} — possible duplicate request.`,
+    );
     return { eligible: false, daysSinceDelivery: null, findings };
   }
 
-  if (order.status === 'REFUND_PENDING') {
-    findings.push('A refund is already in progress — this may be a status chase rather than a new request.');
+  if (order.status === "REFUND_PENDING") {
+    findings.push(
+      "A refund is already in progress — this may be a status chase rather than a new request.",
+    );
     return { eligible: false, daysSinceDelivery: null, findings };
   }
 
-  if (order.status === 'RETURN_REQUESTED' || order.status === 'RETURN_PICKED_UP') {
-    findings.push('A return is already open on this order.');
+  if (
+    order.status === "RETURN_REQUESTED" ||
+    order.status === "RETURN_PICKED_UP"
+  ) {
+    findings.push("A return is already open on this order.");
     return { eligible: false, daysSinceDelivery: null, findings };
   }
 
-  if (order.status !== 'DELIVERED') {
+  if (order.status !== "DELIVERED") {
     findings.push(
       `Not delivered yet, so a return does not apply — this is a cancellation or a delivery issue instead.`,
     );
@@ -169,24 +182,28 @@ export function assessReturn(order: Order, now: Date = new Date()): ReturnAssess
   const days = delivered ? daysBetween(delivered, now) : null;
   findings.push(
     delivered
-      ? `Delivered ${days} day${days === 1 ? '' : 's'} ago on ${order.deliveredAt}.`
-      : 'Delivery date missing on the order record.',
+      ? `Delivered ${days} day${days === 1 ? "" : "s"} ago on ${order.deliveredAt}.`
+      : "Delivery date missing on the order record.",
   );
 
   // Category policy is per item, so a mixed basket can be partly returnable.
-  const blocked = order.items.filter((i) => i.returnPolicy === 'NON_RETURNABLE');
-  const replacementOnly = order.items.filter((i) => i.returnPolicy === 'REPLACEMENT_ONLY');
+  const blocked = order.items.filter(
+    (i) => i.returnPolicy === "NON_RETURNABLE",
+  );
+  const replacementOnly = order.items.filter(
+    (i) => i.returnPolicy === "REPLACEMENT_ONLY",
+  );
 
   if (blocked.length > 0) {
     findings.push(
-      `Non-returnable item(s): ${blocked.map((i) => `${i.name} (${i.category})`).join(', ')}.`,
+      `Non-returnable item(s): ${blocked.map((i) => `${i.name} (${i.category})`).join(", ")}.`,
     );
   }
   if (replacementOnly.length > 0) {
     findings.push(
       `Replacement-only item(s), no refund under policy: ${replacementOnly
         .map((i) => `${i.name} (${i.category})`)
-        .join(', ')}.`,
+        .join(", ")}.`,
     );
   }
 
@@ -194,13 +211,17 @@ export function assessReturn(order: Order, now: Date = new Date()): ReturnAssess
   findings.push(
     withinWindow
       ? `Within the ${order.returnWindowDays}-day return window (${order.returnWindowDays - (days ?? 0)} day(s) remaining).`
-      : `Return window of ${order.returnWindowDays} days closed ${days !== null ? days - order.returnWindowDays : '?'} day(s) ago.`,
+      : `Return window of ${order.returnWindowDays} days closed ${days !== null ? days - order.returnWindowDays : "?"} day(s) ago.`,
   );
 
-  const anyReturnable = order.items.some((i) => i.returnPolicy === 'RETURNABLE');
+  const anyReturnable = order.items.some(
+    (i) => i.returnPolicy === "RETURNABLE",
+  );
 
-  if (order.paymentMethod === 'COD') {
-    findings.push('Paid cash on delivery — a refund needs bank details collected from the caller.');
+  if (order.paymentMethod === "COD") {
+    findings.push(
+      "Paid cash on delivery — a refund needs bank details collected from the caller.",
+    );
   }
 
   return {
@@ -211,41 +232,46 @@ export function assessReturn(order: Order, now: Date = new Date()): ReturnAssess
 }
 
 /** Case priority for a handover, from real order facts rather than sentiment. */
-export function priorityFor(order: Order | null, policy: PolicyConfig): 'low' | 'medium' | 'high' | 'urgent' {
-  if (!order) return 'medium';
-  if (order.status === 'LOST_IN_TRANSIT' || order.status === 'REFUND_PENDING') return 'urgent';
-  if (order.totalInr >= policy.highValueInr * 2) return 'urgent';
-  if (order.totalInr >= policy.highValueInr) return 'high';
-  if (order.status === 'OUT_FOR_DELIVERY' || order.status === 'DELAYED') return 'high';
-  if (order.failedDeliveryAttempts >= 2) return 'high';
-  return 'medium';
+export function priorityFor(
+  order: Order | null,
+  policy: PolicyConfig,
+): "low" | "medium" | "high" | "urgent" {
+  if (!order) return "medium";
+  if (order.status === "LOST_IN_TRANSIT" || order.status === "REFUND_PENDING")
+    return "urgent";
+  if (order.totalInr >= policy.highValueInr * 2) return "urgent";
+  if (order.totalInr >= policy.highValueInr) return "high";
+  if (order.status === "OUT_FOR_DELIVERY" || order.status === "DELAYED")
+    return "high";
+  if (order.failedDeliveryAttempts >= 2) return "high";
+  return "medium";
 }
 
-export function paymentLabel(method: Order['paymentMethod']): string {
+export function paymentLabel(method: Order["paymentMethod"]): string {
   switch (method) {
-    case 'PREPAID_CARD':
-      return 'card';
-    case 'UPI':
-      return 'UPI';
-    case 'NET_BANKING':
-      return 'net banking';
-    case 'COD':
-      return 'cash on delivery';
-    case 'EMI':
-      return 'card EMI';
-    case 'WALLET':
-      return 'wallet';
+    case "PREPAID_CARD":
+      return "card";
+    case "UPI":
+      return "UPI";
+    case "NET_BANKING":
+      return "net banking";
+    case "COD":
+      return "cash on delivery";
+    case "EMI":
+      return "card EMI";
+    case "WALLET":
+      return "wallet";
   }
 }
 
 export function returnPolicyLabel(policy: ReturnPolicyClass): string {
   switch (policy) {
-    case 'RETURNABLE':
-      return 'returnable';
-    case 'REPLACEMENT_ONLY':
-      return 'replacement only';
-    case 'NON_RETURNABLE':
-      return 'non-returnable';
+    case "RETURNABLE":
+      return "returnable";
+    case "REPLACEMENT_ONLY":
+      return "replacement only";
+    case "NON_RETURNABLE":
+      return "non-returnable";
   }
 }
 

@@ -1,9 +1,10 @@
-import agoraToken from 'agora-token';
-import { EventEmitter } from 'node:events';
-import { getDatabase } from '@echosphere/db';
-import type { LanguageCode } from '@echosphere/core';
-import { config, getSystemStatus } from './config.js';
-import { agentWorker } from './agent-worker.js';
+import agoraToken from "agora-token";
+import { EventEmitter } from "node:events";
+import { getDatabase } from "@echosphere/db";
+import type { LanguageCode } from "@echosphere/core";
+import { config, getSystemStatus } from "./config.js";
+import { agentWorker } from "./agent-worker.js";
+import { logVoiceDiagnostic } from "./diagnostics.js";
 
 const {
   RtcRole,
@@ -28,13 +29,13 @@ export interface SignallingEvent {
   id: string;
   callId: string;
   event:
-    | 'call_started'
-    | 'caller_utterance'
-    | 'gemini_thinking'
-    | 'agent_reply'
-    | 'escalation_triggered'
-    | 'call_ended'
-    | 'ping';
+    | "call_started"
+    | "caller_utterance"
+    | "gemini_thinking"
+    | "agent_reply"
+    | "escalation_triggered"
+    | "call_ended"
+    | "ping";
   payload: Record<string, unknown>;
   timestamp: string;
 }
@@ -58,14 +59,22 @@ class AgoraService {
   /**
    * Generates Agora RTC, Signalling (RTM), SST (STT), and Conversational AI tokens.
    */
-  generateTokens(channelName: string, uidInput?: number | string): AgoraChannelTokens {
+  generateTokens(
+    channelName: string,
+    uidInput?: number | string,
+  ): AgoraChannelTokens {
     if (!this.isConfigured) {
-      throw new Error('Agora credentials (AGORA_APP_ID, AGORA_APP_CERTIFICATE) are not configured.');
+      throw new Error(
+        "Agora credentials (AGORA_APP_ID, AGORA_APP_CERTIFICATE) are not configured.",
+      );
     }
 
-    const uid = typeof uidInput === 'number' && !isNaN(uidInput) ? uidInput : 0;
-    const rtmUid = String(uid || `user_${Math.random().toString(36).slice(2, 8)}`);
-    const expiresAt = Math.floor(Date.now() / 1000) + config.agora.tokenTtlSeconds;
+    const uid = typeof uidInput === "number" && !isNaN(uidInput) ? uidInput : 0;
+    const rtmUid = String(
+      uid || `user_${Math.random().toString(36).slice(2, 8)}`,
+    );
+    const expiresAt =
+      Math.floor(Date.now() / 1000) + config.agora.tokenTtlSeconds;
 
     // 1. Standard Agora RTC Audio Token (Voice Channel)
     const rtcToken = RtcTokenBuilder.buildTokenWithUid(
@@ -126,6 +135,11 @@ class AgoraService {
       convoAiToken = undefined;
     }
 
+    logVoiceDiagnostic("AGORA_TOKEN_CREATED", {
+      channelName,
+      uid,
+    });
+
     return {
       appId: config.agora.appId,
       channelName,
@@ -143,7 +157,7 @@ class AgoraService {
    */
   publishSignalling(
     callId: string,
-    event: SignallingEvent['event'],
+    event: SignallingEvent["event"],
     payload: Record<string, unknown> = {},
   ): SignallingEvent {
     const item: SignallingEvent = {
@@ -159,7 +173,7 @@ class AgoraService {
       this.recentEvents.shift();
     }
 
-    this.emitter.emit('event', item);
+    this.emitter.emit("event", item);
     this.emitter.emit(`call:${callId}`, item);
     return item;
   }
@@ -167,8 +181,11 @@ class AgoraService {
   /**
    * Subscribe to signalling stream.
    */
-  subscribe(listener: (event: SignallingEvent) => void, callId?: string): () => void {
-    const eventName = callId ? `call:${callId}` : 'event';
+  subscribe(
+    listener: (event: SignallingEvent) => void,
+    callId?: string,
+  ): () => void {
+    const eventName = callId ? `call:${callId}` : "event";
     this.emitter.on(eventName, listener);
     return () => {
       this.emitter.off(eventName, listener);
@@ -183,11 +200,11 @@ class AgoraService {
   }
 
   /**
-   * Starts an Agora Cloud Conversational AI Agent via the persistent Agent Worker.
+   * Starts an Agora Cloud Conversational AI Agent in the channel.
    */
   async startConversationalAgent(
     channelName: string,
-    language: LanguageCode = 'en',
+    language: LanguageCode = "en",
     customGreeting?: string,
     explicitCallId?: string,
   ) {
@@ -195,11 +212,11 @@ class AgoraService {
       return {
         ok: false,
         enabled: false,
-        message: 'Agora Customer ID or Secret not configured for Cloud Agent.',
+        message: "Agora Customer ID or Secret not configured for Cloud Agent.",
       };
     }
 
-    // Resolve callId from database or channel name
+    // Resolve callId deterministically from channel or explicit parameter
     let callId = explicitCallId;
     if (!callId) {
       try {
@@ -213,7 +230,9 @@ class AgoraService {
       }
     }
     if (!callId) {
-      callId = channelName.startsWith('nerv_') ? channelName.slice(5) : channelName;
+      callId = channelName.startsWith("nerv_")
+        ? channelName.slice(5)
+        : channelName;
     }
 
     return agentWorker.startSession({
@@ -225,13 +244,6 @@ class AgoraService {
   }
 
   /**
-   * Sends text to be spoken into the channel by the Agora Cloud Conversational AI Agent.
-   */
-  async speakConversationalAgent(channelName: string, text: string) {
-    return agentWorker.speak(channelName, text);
-  }
-
-  /**
    * Stops an Agora Cloud Conversational AI Agent session cleanly.
    */
   async stopConversationalAgent(channelName: string, _agentName?: string) {
@@ -240,21 +252,26 @@ class AgoraService {
 
   /**
    * Get detailed health and capability status.
+   * "agentActive" is true ONLY if actual agent sessions are running.
    */
   getStatus() {
     const sys = getSystemStatus();
+    const activeCount = agentWorker.getActiveCount();
     return {
       enabled: this.isConfigured,
       appId: config.agora.appId ? `${config.agora.appId.slice(0, 6)}...` : null,
-      capabilities: {
-        voiceRtc: sys.agora.voiceRtc,
-        speechToTextSst: sys.agora.speechToTextSst,
-        conversationalAi: sys.agora.conversationalAi,
-        signallingRtm: sys.agora.signallingRtm,
-        cloudAgentConfigured: sys.agora.cloudAgent,
-        agentWorkerRunning: true,
-      },
-      activeSessions: agentWorker.getActiveCount(),
+      rtcConfigured: sys.agora.voiceRtc,
+      cloudAgentConfigured: sys.agora.cloudAgent,
+      llmBridgeConfigured: sys.agora.llmBridgeConfigured,
+      llmBridgeUrl: sys.agora.llmBridgeUrl,
+      sttConfigured: sys.agora.sttConfigured,
+      sttProvider: sys.agora.sttProvider,
+      sttModel: sys.agora.sttModel,
+      ttsConfigured: sys.agora.ttsConfigured,
+      ttsProvider: sys.agora.ttsProvider,
+      ttsModel: sys.agora.ttsModel,
+      activeSessions: activeCount,
+      agentActive: activeCount > 0,
       system: sys,
     };
   }

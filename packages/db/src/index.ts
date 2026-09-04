@@ -6,16 +6,16 @@ import {
   SessionRepository,
   TicketRepository,
   TranscriptRepository,
-} from './repositories.js';
-import { getStore, type Store } from './store.js';
-import { UserRepository } from './repositories.js';
+} from "./repositories.js";
+import { getStore, type Store } from "./store.js";
+import { UserRepository } from "./repositories.js";
 
-export * from './types.js';
-export * from './store.js';
-export * from './catalogue.js';
-export * from './repositories.js';
-export * from './seed.js';
-export { SCHEMA_SQL } from './schema.js';
+export * from "./types.js";
+export * from "./store.js";
+export * from "./catalogue.js";
+export * from "./repositories.js";
+export * from "./seed.js";
+export { SCHEMA_SQL } from "./schema.js";
 
 /** Every repository, sharing one store. */
 export interface Database {

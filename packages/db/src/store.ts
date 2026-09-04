@@ -17,7 +17,7 @@
 
 export type Primitive = string | number | boolean | null;
 
-export type Comparator = '=' | '!=' | '<' | '<=' | '>' | '>=' | 'like' | 'in';
+export type Comparator = "=" | "!=" | "<" | "<=" | ">" | ">=" | "like" | "in";
 
 export interface Condition {
   column: string;
@@ -29,13 +29,13 @@ export interface Condition {
 export type Where = Record<string, Primitive> | Condition[];
 
 export interface FindOptions {
-  orderBy?: { column: string; direction: 'asc' | 'desc' };
+  orderBy?: { column: string; direction: "asc" | "desc" };
   limit?: number;
   offset?: number;
 }
 
 export interface Store {
-  readonly kind: 'postgres' | 'memory';
+  readonly kind: "postgres" | "memory";
   insert<T extends object>(table: string, row: T): Promise<T>;
   update<T extends object>(
     table: string,
@@ -43,7 +43,11 @@ export interface Store {
     patch: Partial<T>,
   ): Promise<T | null>;
   findById<T>(table: string, id: string): Promise<T | null>;
-  findMany<T>(table: string, where?: Where, options?: FindOptions): Promise<T[]>;
+  findMany<T>(
+    table: string,
+    where?: Where,
+    options?: FindOptions,
+  ): Promise<T[]>;
   count(table: string, where?: Where): Promise<number>;
   delete(table: string, id: string): Promise<boolean>;
   /** Postgres only. Memory backend throws — callers must fall back. */
@@ -62,25 +66,36 @@ export function toCamel(name: string): string {
 }
 
 function keysToSnake(row: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(row).map(([k, v]) => [toSnake(k), v]));
+  return Object.fromEntries(
+    Object.entries(row).map(([k, v]) => [toSnake(k), v]),
+  );
 }
 
 function keysToCamel<T>(row: Record<string, unknown>): T {
-  return Object.fromEntries(Object.entries(row).map(([k, v]) => [toCamel(k), v])) as T;
+  return Object.fromEntries(
+    Object.entries(row).map(([k, v]) => [toCamel(k), v]),
+  ) as T;
 }
 
 function normaliseWhere(where: Where | undefined): Condition[] {
   if (!where) return [];
   if (Array.isArray(where)) return where;
-  return Object.entries(where).map(([column, value]) => ({ column, op: '=' as Comparator, value }));
+  return Object.entries(where).map(([column, value]) => ({
+    column,
+    op: "=" as Comparator,
+    value,
+  }));
 }
 
 // ── Postgres ──────────────────────────────────────────────────────────────────
 
-type SqlExecutor = (sql: string, params: Primitive[]) => Promise<Record<string, unknown>[]>;
+type SqlExecutor = (
+  sql: string,
+  params: Primitive[],
+) => Promise<Record<string, unknown>[]>;
 
 export class PostgresStore implements Store {
-  readonly kind = 'postgres' as const;
+  readonly kind = "postgres" as const;
 
   constructor(private readonly exec: SqlExecutor) {}
 
@@ -95,8 +110,8 @@ export class PostgresStore implements Store {
     const values = columns.map((c) => serialise(data[c]));
 
     const rows = await this.exec(
-      `INSERT INTO ${ident(table)} (${columns.map(ident).join(', ')})
-       VALUES (${placeholders.join(', ')}) RETURNING *`,
+      `INSERT INTO ${ident(table)} (${columns.map(ident).join(", ")})
+       VALUES (${placeholders.join(", ")}) RETURNING *`,
       values,
     );
     return keysToCamel<T>(rows[0] ?? data);
@@ -115,7 +130,7 @@ export class PostgresStore implements Store {
     const values = columns.map((c) => serialise(data[c]));
 
     const rows = await this.exec(
-      `UPDATE ${ident(table)} SET ${assignments.join(', ')}
+      `UPDATE ${ident(table)} SET ${assignments.join(", ")}
        WHERE id = $${columns.length + 1} RETURNING *`,
       [...values, id],
     );
@@ -123,22 +138,30 @@ export class PostgresStore implements Store {
   }
 
   async findById<T>(table: string, id: string): Promise<T | null> {
-    const rows = await this.exec(`SELECT * FROM ${ident(table)} WHERE id = $1 LIMIT 1`, [id]);
+    const rows = await this.exec(
+      `SELECT * FROM ${ident(table)} WHERE id = $1 LIMIT 1`,
+      [id],
+    );
     return rows[0] ? keysToCamel<T>(rows[0]) : null;
   }
 
-  async findMany<T>(table: string, where?: Where, options?: FindOptions): Promise<T[]> {
+  async findMany<T>(
+    table: string,
+    where?: Where,
+    options?: FindOptions,
+  ): Promise<T[]> {
     const conditions = normaliseWhere(where);
     const { clause, params } = buildWhereClause(conditions);
 
     let sql = `SELECT * FROM ${ident(table)}${clause}`;
     if (options?.orderBy) {
       sql += ` ORDER BY ${ident(toSnake(options.orderBy.column))} ${
-        options.orderBy.direction === 'desc' ? 'DESC' : 'ASC'
+        options.orderBy.direction === "desc" ? "DESC" : "ASC"
       }`;
     }
     if (options?.limit !== undefined) sql += ` LIMIT ${Number(options.limit)}`;
-    if (options?.offset !== undefined) sql += ` OFFSET ${Number(options.offset)}`;
+    if (options?.offset !== undefined)
+      sql += ` OFFSET ${Number(options.offset)}`;
 
     const rows = await this.exec(sql, params);
     return rows.map((r) => keysToCamel<T>(r));
@@ -146,12 +169,18 @@ export class PostgresStore implements Store {
 
   async count(table: string, where?: Where): Promise<number> {
     const { clause, params } = buildWhereClause(normaliseWhere(where));
-    const rows = await this.exec(`SELECT COUNT(*)::int AS n FROM ${ident(table)}${clause}`, params);
+    const rows = await this.exec(
+      `SELECT COUNT(*)::int AS n FROM ${ident(table)}${clause}`,
+      params,
+    );
     return Number((rows[0] as { n?: number } | undefined)?.n ?? 0);
   }
 
   async delete(table: string, id: string): Promise<boolean> {
-    const rows = await this.exec(`DELETE FROM ${ident(table)} WHERE id = $1 RETURNING id`, [id]);
+    const rows = await this.exec(
+      `DELETE FROM ${ident(table)} WHERE id = $1 RETURNING id`,
+      [id],
+    );
     return rows.length > 0;
   }
 
@@ -161,28 +190,32 @@ export class PostgresStore implements Store {
   }
 }
 
-function buildWhereClause(conditions: Condition[]): { clause: string; params: Primitive[] } {
-  if (conditions.length === 0) return { clause: '', params: [] };
+function buildWhereClause(conditions: Condition[]): {
+  clause: string;
+  params: Primitive[];
+} {
+  if (conditions.length === 0) return { clause: "", params: [] };
 
   const params: Primitive[] = [];
   const parts = conditions.map((c) => {
     const column = ident(toSnake(c.column));
-    if (c.op === 'in') {
+    if (c.op === "in") {
       const list = Array.isArray(c.value) ? c.value : [c.value];
-      if (list.length === 0) return 'FALSE';
+      if (list.length === 0) return "FALSE";
       const placeholders = list.map((v) => {
         params.push(v);
         return `$${params.length}`;
       });
-      return `${column} IN (${placeholders.join(', ')})`;
+      return `${column} IN (${placeholders.join(", ")})`;
     }
-    if (c.value === null) return c.op === '!=' ? `${column} IS NOT NULL` : `${column} IS NULL`;
+    if (c.value === null)
+      return c.op === "!=" ? `${column} IS NOT NULL` : `${column} IS NULL`;
     params.push(c.value as Primitive);
-    const op = c.op === 'like' ? 'ILIKE' : c.op;
+    const op = c.op === "like" ? "ILIKE" : c.op;
     return `${column} ${op} $${params.length}`;
   });
 
-  return { clause: ` WHERE ${parts.join(' AND ')}`, params };
+  return { clause: ` WHERE ${parts.join(" AND ")}`, params };
 }
 
 /**
@@ -202,13 +235,13 @@ function ident(name: string): string {
 function serialise(value: unknown): Primitive {
   if (value === undefined) return null;
   if (value === null) return null;
-  if (typeof value === 'object') return JSON.stringify(value);
+  if (typeof value === "object") return JSON.stringify(value);
   if (value instanceof Date) return (value as Date).toISOString();
   return value as Primitive;
 }
 
-import fs from 'node:fs';
-import path from 'node:path';
+import fs from "node:fs";
+import path from "node:path";
 
 // ── Memory ────────────────────────────────────────────────────────────────────
 
@@ -218,9 +251,9 @@ function getDevStorePath(): string {
   }
   const cwd = process.cwd();
   const candidates = [
-    path.resolve(cwd, '.data', 'dev-store.json'),
-    path.resolve(cwd, 'apps', 'api', '.data', 'dev-store.json'),
-    path.resolve(cwd, '..', '.data', 'dev-store.json'),
+    path.resolve(cwd, ".data", "dev-store.json"),
+    path.resolve(cwd, "apps", "api", ".data", "dev-store.json"),
+    path.resolve(cwd, "..", ".data", "dev-store.json"),
   ];
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
@@ -229,7 +262,7 @@ function getDevStorePath(): string {
 }
 
 export class MemoryStore implements Store {
-  readonly kind = 'memory' as const;
+  readonly kind = "memory" as const;
   private tables = new Map<string, Map<string, Record<string, unknown>>>();
   private readonly storePath: string;
 
@@ -241,13 +274,15 @@ export class MemoryStore implements Store {
   private loadFromDisk(): void {
     try {
       if (fs.existsSync(this.storePath)) {
-        const raw = fs.readFileSync(this.storePath, 'utf-8');
+        const raw = fs.readFileSync(this.storePath, "utf-8");
         const data = JSON.parse(raw);
-        if (data && typeof data === 'object') {
+        if (data && typeof data === "object") {
           for (const [tableName, rows] of Object.entries(data)) {
             const tableMap = new Map<string, Record<string, unknown>>();
-            if (rows && typeof rows === 'object') {
-              for (const [id, row] of Object.entries(rows as Record<string, Record<string, unknown>>)) {
+            if (rows && typeof rows === "object") {
+              for (const [id, row] of Object.entries(
+                rows as Record<string, Record<string, unknown>>,
+              )) {
                 tableMap.set(id, row);
               }
             }
@@ -270,7 +305,7 @@ export class MemoryStore implements Store {
       for (const [table, map] of this.tables.entries()) {
         data[table] = Object.fromEntries(map.entries());
       }
-      fs.writeFileSync(this.storePath, JSON.stringify(data, null, 2), 'utf-8');
+      fs.writeFileSync(this.storePath, JSON.stringify(data, null, 2), "utf-8");
     } catch {
       // Ignore disk write errors in ephemeral environments
     }
@@ -305,7 +340,10 @@ export class MemoryStore implements Store {
     const t = this.table(table);
     const existing = t.get(id);
     if (!existing) return null;
-    const merged = { ...existing, ...stripUndefined(patch as Record<string, unknown>) };
+    const merged = {
+      ...existing,
+      ...stripUndefined(patch as Record<string, unknown>),
+    };
     t.set(id, merged);
     this.saveToDisk();
     return structuredClone(merged) as T;
@@ -316,24 +354,36 @@ export class MemoryStore implements Store {
     return row ? (structuredClone(row) as T) : null;
   }
 
-  async findMany<T>(table: string, where?: Where, options?: FindOptions): Promise<T[]> {
+  async findMany<T>(
+    table: string,
+    where?: Where,
+    options?: FindOptions,
+  ): Promise<T[]> {
     const conditions = normaliseWhere(where);
-    let rows = [...this.table(table).values()].filter((row) => conditions.every((c) => matches(row, c)));
+    let rows = [...this.table(table).values()].filter((row) =>
+      conditions.every((c) => matches(row, c)),
+    );
 
     if (options?.orderBy) {
       const { column, direction } = options.orderBy;
-      rows = rows.sort((a, b) => compare(a[column], b[column]) * (direction === 'desc' ? -1 : 1));
+      rows = rows.sort(
+        (a, b) =>
+          compare(a[column], b[column]) * (direction === "desc" ? -1 : 1),
+      );
     }
 
     const offset = options?.offset ?? 0;
     const limit = options?.limit ?? rows.length;
-    return rows.slice(offset, offset + limit).map((r) => structuredClone(r) as T);
+    return rows
+      .slice(offset, offset + limit)
+      .map((r) => structuredClone(r) as T);
   }
 
   async count(table: string, where?: Where): Promise<number> {
     const conditions = normaliseWhere(where);
-    return [...this.table(table).values()].filter((row) => conditions.every((c) => matches(row, c)))
-      .length;
+    return [...this.table(table).values()].filter((row) =>
+      conditions.every((c) => matches(row, c)),
+    ).length;
   }
 
   async delete(table: string, id: string): Promise<boolean> {
@@ -344,7 +394,7 @@ export class MemoryStore implements Store {
 
   async raw<T>(): Promise<T[]> {
     throw new Error(
-      'raw SQL is not available on the in-memory store; compute the aggregate in TypeScript instead',
+      "raw SQL is not available on the in-memory store; compute the aggregate in TypeScript instead",
     );
   }
 
@@ -359,23 +409,27 @@ function matches(row: Record<string, unknown>, condition: Condition): boolean {
   const { op, value } = condition;
 
   switch (op) {
-    case '=':
+    case "=":
       return actual === value || (value === null && actual == null);
-    case '!=':
+    case "!=":
       return actual !== value;
-    case 'in':
-      return (Array.isArray(value) ? value : [value]).includes(actual as Primitive);
-    case 'like': {
-      if (typeof actual !== 'string' || typeof value !== 'string') return false;
-      return actual.toLowerCase().includes(value.replace(/%/g, '').toLowerCase());
+    case "in":
+      return (Array.isArray(value) ? value : [value]).includes(
+        actual as Primitive,
+      );
+    case "like": {
+      if (typeof actual !== "string" || typeof value !== "string") return false;
+      return actual
+        .toLowerCase()
+        .includes(value.replace(/%/g, "").toLowerCase());
     }
-    case '<':
+    case "<":
       return compare(actual, value) < 0;
-    case '<=':
+    case "<=":
       return compare(actual, value) <= 0;
-    case '>':
+    case ">":
       return compare(actual, value) > 0;
-    case '>=':
+    case ">=":
       return compare(actual, value) >= 0;
   }
 }
@@ -384,16 +438,21 @@ function compare(a: unknown, b: unknown): number {
   if (a == null && b == null) return 0;
   if (a == null) return -1;
   if (b == null) return 1;
-  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  if (typeof a === "number" && typeof b === "number") return a - b;
   return String(a).localeCompare(String(b));
 }
 
 function stripUndefined(obj: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined));
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, v]) => v !== undefined),
+  );
 }
 
 export function cryptoRandomId(): string {
-  return globalThis.crypto?.randomUUID?.() ?? `id_${Math.random().toString(36).slice(2, 12)}`;
+  return (
+    globalThis.crypto?.randomUUID?.() ??
+    `id_${Math.random().toString(36).slice(2, 12)}`
+  );
 }
 
 // ── Factory ───────────────────────────────────────────────────────────────────
@@ -410,10 +469,11 @@ export async function getStore(databaseUrl?: string): Promise<Store> {
   if (cached) return cached;
 
   const url = databaseUrl?.trim();
-  const usable = url && /^postgres(ql)?:\/\//.test(url) && !url.includes('localhost:5432');
+  const usable =
+    url && /^postgres(ql)?:\/\//.test(url) && !url.includes("localhost:5432");
 
   if (usable) {
-    const { neon } = await import('@neondatabase/serverless');
+    const { neon } = await import("@neondatabase/serverless");
     const sql = neon(url!);
     cached = new PostgresStore(async (text, params) => {
       const result = (await sql.query(text, params)) as unknown;

@@ -9,12 +9,19 @@ import {
   type LanguageCode,
   type Order,
   type TurnResult,
-} from '@echosphere/core';
-import { getDatabase, type CallRow, type TicketCategory, type TicketPriority } from '@echosphere/db';
-import { priorityFor } from '@echosphere/core';
-import { config, policy } from './config.js';
-import { getModel } from './model.js';
-import { agoraService } from './agora.js';
+} from "@echosphere/core";
+import {
+  getDatabase,
+  type CallRow,
+  type TicketCategory,
+  type TicketPriority,
+} from "@echosphere/db";
+import { priorityFor } from "@echosphere/core";
+import { config, policy } from "./config.js";
+import { getModel } from "./model.js";
+import { agoraService } from "./agora.js";
+import { agentWorker } from "./agent-worker.js";
+import { logVoiceDiagnostic } from "./diagnostics.js";
 
 /**
  * Call orchestration.
@@ -40,41 +47,61 @@ export async function startCall(input: {
   callerPhone?: string | null;
 }): Promise<StartCallResult> {
   const db = await getDatabase(config.DATABASE_URL);
-  const language = input.language ?? 'en';
-  const channelName = input.channelName ?? `nerv_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const language = input.language ?? "en";
+  const channelName =
+    input.channelName ??
+    `nerv_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
   const call = await db.calls.create({
     language,
     channelName,
     callerName: input.callerName ?? null,
     callerPhone: input.callerPhone ?? null,
-    state: createState('pending'),
+    state: createState("pending"),
   });
 
   // The engine keys state by session id, which is the call id once it exists.
   const state = createState(call.id, {}, undefined);
-  await db.calls.syncFromState(call.id, { ...state, language: { ...state.language, primary: language } });
+  await db.calls.syncFromState(call.id, {
+    ...state,
+    language: { ...state.language, primary: language },
+  });
 
   const opening = greeting(language);
   await db.transcripts.append({
     callId: call.id,
-    speaker: 'agent',
+    speaker: "agent",
     text: opening,
     language,
   });
 
   // Broadcast call initiation across Agora Signalling
-  agoraService.publishSignalling(call.id, 'call_started', {
+  agoraService.publishSignalling(call.id, "call_started", {
     callId: call.id,
     caseRef: call.caseRef,
     channelName,
     language,
   });
 
-  return { callId: call.id, caseRef: call.caseRef, greeting: opening, language, channelName };
+  logVoiceDiagnostic("CALL_CREATED", {
+    callId: call.id,
+    caseRef: call.caseRef,
+    channelName,
+    language,
+  });
+
+  return {
+    callId: call.id,
+    caseRef: call.caseRef,
+    greeting: opening,
+    language,
+    channelName,
+  };
 }
 
-export async function findCallByChannel(channelName: string): Promise<CallRow | null> {
+export async function findCallByChannel(
+  channelName: string,
+): Promise<CallRow | null> {
   const db = await getDatabase(config.DATABASE_URL);
   return db.calls.findByChannel(channelName);
 }
@@ -105,37 +132,45 @@ export async function handleTurn(input: {
 }): Promise<TurnOutcome | { error: string }> {
   const db = await getDatabase(config.DATABASE_URL);
   const call = await db.calls.findById(input.callId);
-  if (!call) return { error: 'Call not found' };
-  if (call.endedAt) return { error: 'This call has already ended' };
+  if (!call) return { error: "Call not found" };
+  if (call.endedAt) return { error: "This call has already ended" };
 
-  const state = (call.state as ConversationState | null) ?? createState(call.id);
+  const state =
+    (call.state as ConversationState | null) ?? createState(call.id);
   const history = (await db.transcripts.forCall(call.id)).map((t) => ({
-    speaker: t.speaker === 'caller' ? ('caller' as const) : ('agent' as const),
+    speaker: t.speaker === "caller" ? ("caller" as const) : ("agent" as const),
     text: t.text,
   }));
 
   await db.transcripts.append({
     callId: call.id,
-    speaker: 'caller',
+    speaker: "caller",
     text: input.text,
     language: state.language.primary,
     confidence: input.asrConfidence ?? 1,
   });
 
   // Signalling: broadcast incoming caller voice transcription
-  agoraService.publishSignalling(call.id, 'caller_utterance', {
+  agoraService.publishSignalling(call.id, "caller_utterance", {
     callId: call.id,
     text: input.text,
     asrConfidence: input.asrConfidence ?? 1,
   });
 
-  agoraService.publishSignalling(call.id, 'gemini_thinking', { callId: call.id });
+  agoraService.publishSignalling(call.id, "gemini_thinking", {
+    callId: call.id,
+  });
 
   const model = getModel();
   let result: TurnResult;
   try {
     result = await runTurn(
-      { state, utterance: input.text, asrConfidence: input.asrConfidence, history },
+      {
+        state,
+        utterance: input.text,
+        asrConfidence: input.asrConfidence,
+        history,
+      },
       {
         policy,
         lookupOrder: (orderId) => db.orders.lookup(orderId),
@@ -144,13 +179,13 @@ export async function handleTurn(input: {
       },
     );
   } catch (error) {
-    console.error('[turn] engine failure', error);
-    return { error: 'The call could not be processed' };
+    console.error("[turn] engine failure", error);
+    return { error: "The call could not be processed" };
   }
 
   await db.transcripts.append({
     callId: call.id,
-    speaker: 'agent',
+    speaker: "agent",
     text: result.reply,
     language: result.language,
   });
@@ -160,7 +195,7 @@ export async function handleTurn(input: {
   let caseRef: string | null = null;
   if (result.escalated && !call.escalated) {
     caseRef = await createCase(call, result);
-    agoraService.publishSignalling(call.id, 'escalation_triggered', {
+    agoraService.publishSignalling(call.id, "escalation_triggered", {
       callId: call.id,
       caseRef,
       reason: result.state.escalation.reason,
@@ -168,7 +203,7 @@ export async function handleTurn(input: {
     });
   }
 
-  agoraService.publishSignalling(call.id, 'agent_reply', {
+  agoraService.publishSignalling(call.id, "agent_reply", {
     callId: call.id,
     reply: result.reply,
     language: result.language,
@@ -207,7 +242,8 @@ async function createCase(call: CallRow, result: TurnResult): Promise<string> {
   const report = state.escalation.report ?? buildReport(state, result.order);
 
   const priority: TicketPriority = priorityFor(result.order, policy);
-  const customerName = report.ordererName ?? state.customer.name ?? 'Unidentified caller';
+  const customerName =
+    report.ordererName ?? state.customer.name ?? "Unidentified caller";
 
   const ticket = await db.tickets.create({
     callId: call.id,
@@ -216,16 +252,20 @@ async function createCase(call: CallRow, result: TurnResult): Promise<string> {
     orderId: report.orderId,
     subject: subjectFor(reason, report.orderId),
     description: [
-      state.escalation.detail ?? '',
-      report.statedReason ? `Caller's reason: "${report.statedReason}"` : '',
-      report.policyFindings.length > 0 ? `Findings:\n- ${report.policyFindings.join('\n- ')}` : '',
-      report.outstanding.length > 0 ? `Still open:\n- ${report.outstanding.join('\n- ')}` : '',
+      state.escalation.detail ?? "",
+      report.statedReason ? `Caller's reason: "${report.statedReason}"` : "",
+      report.policyFindings.length > 0
+        ? `Findings:\n- ${report.policyFindings.join("\n- ")}`
+        : "",
+      report.outstanding.length > 0
+        ? `Still open:\n- ${report.outstanding.join("\n- ")}`
+        : "",
     ]
       .filter(Boolean)
-      .join('\n\n'),
+      .join("\n\n"),
     category: categoryFor(state.intent.value),
     priority,
-    actorName: 'AI agent',
+    actorName: "AI agent",
   });
 
   const transcript = await db.transcripts.forCall(call.id);
@@ -247,8 +287,8 @@ async function createCase(call: CallRow, result: TurnResult): Promise<string> {
 
   await db.tickets.addEvent(ticket.id, {
     actorId: null,
-    actorName: 'AI agent',
-    kind: 'escalated',
+    actorName: "AI agent",
+    kind: "escalated",
     toValue: escalationLabel(reason),
     body: state.escalation.detail,
   });
@@ -271,24 +311,26 @@ async function summarise(
   const deterministic = [
     report.orderId
       ? `Caller is asking about order ${report.orderId}${
-          report.ordererName ? `, placed by ${report.ordererName}` : ''
-        }${order ? ` (${order.items[0]?.name ?? 'item'}, currently ${humanStatus(order.status)})` : ''}.`
-      : 'No order was identified during the call.',
+          report.ordererName ? `, placed by ${report.ordererName}` : ""
+        }${order ? ` (${order.items[0]?.name ?? "item"}, currently ${humanStatus(order.status)})` : ""}.`
+      : "No order was identified during the call.",
     report.orderConfirmed
-      ? 'Order and identity were verified by the AI before handover.'
-      : 'Order was not fully verified.',
-    report.statedReason ? `Their stated reason: "${report.statedReason}".` : '',
-    report.policyFindings.length > 0 ? report.policyFindings.join(' ') : '',
+      ? "Order and identity were verified by the AI before handover."
+      : "Order was not fully verified.",
+    report.statedReason ? `Their stated reason: "${report.statedReason}".` : "",
+    report.policyFindings.length > 0 ? report.policyFindings.join(" ") : "",
   ]
     .filter(Boolean)
-    .join(' ');
+    .join(" ");
 
   const model = getModel();
   if (!model.available || transcript.length === 0) return deterministic;
 
   try {
-    const text = transcript.map((t) => `${t.speaker}: ${t.text}`).join('\n');
-    const generated = await model.summarise(`${text}\n\nVerified facts: ${deterministic}`);
+    const text = transcript.map((t) => `${t.speaker}: ${t.text}`).join("\n");
+    const generated = await model.summarise(
+      `${text}\n\nVerified facts: ${deterministic}`,
+    );
     return generated || deterministic;
   } catch {
     return deterministic;
@@ -296,17 +338,17 @@ async function summarise(
 }
 
 function subjectFor(reason: string, orderId: string | null): string {
-  const suffix = orderId ? ` — order ${orderId}` : '';
+  const suffix = orderId ? ` — order ${orderId}` : "";
   switch (reason) {
-    case 'CUSTOMER_INSISTED_HUMAN':
+    case "CUSTOMER_INSISTED_HUMAN":
       return `Caller asked for a human${suffix}`;
-    case 'REFUND_OR_RETURN':
+    case "REFUND_OR_RETURN":
       return `Refund / return request${suffix}`;
-    case 'CANCEL_WHILE_OUT_FOR_DELIVERY':
+    case "CANCEL_WHILE_OUT_FOR_DELIVERY":
       return `Cancellation after dispatch${suffix}`;
-    case 'SAFETY_POLICY':
-      return 'Call raised a restricted topic';
-    case 'BACKEND_FAILURE':
+    case "SAFETY_POLICY":
+      return "Call raised a restricted topic";
+    case "BACKEND_FAILURE":
       return `Order lookup failed${suffix}`;
     default:
       return `Escalated call${suffix}`;
@@ -315,40 +357,53 @@ function subjectFor(reason: string, orderId: string | null): string {
 
 function categoryFor(intent: string): TicketCategory {
   switch (intent) {
-    case 'delivery_complaint':
-      return 'delivery';
-    case 'cancellation_request':
-      return 'cancellation';
-    case 'return_request':
-      return 'return';
-    case 'refund_request':
-      return 'refund';
-    case 'address_change':
-      return 'address';
+    case "delivery_complaint":
+      return "delivery";
+    case "cancellation_request":
+      return "cancellation";
+    case "return_request":
+      return "return";
+    case "refund_request":
+      return "refund";
+    case "address_change":
+      return "address";
     default:
-      return 'general';
+      return "general";
   }
 }
 
 /** Short label for the live console, so an operator can see where the call is. */
 function describeStep(result: TurnResult): string {
   const v = result.state.verification;
-  if (result.escalated) return 'Handing over to a human';
-  if (!v.orderId) return 'Waiting for an order number';
-  if (v.lookupOutcome === 'not_found') return 'Order number not recognised';
-  if (v.nameMatches === false) return 'Name does not match the order';
-  if (!v.confirmed) return 'Confirming order details with the caller';
-  return 'Working the request';
+  if (result.escalated) return "Handing over to a human";
+  if (!v.orderId) return "Waiting for an order number";
+  if (v.lookupOutcome === "not_found") return "Order number not recognised";
+  if (v.nameMatches === false) return "Name does not match the order";
+  if (!v.confirmed) return "Confirming order details with the caller";
+  return "Working the request";
 }
 
 export async function endCall(callId: string): Promise<CallRow | null> {
   const db = await getDatabase(config.DATABASE_URL);
   const call = await db.calls.findById(callId);
   if (!call) return null;
-  const ended = await db.calls.end(callId, call.escalated ? 'human' : 'ai');
+  const ended = await db.calls.end(callId, call.escalated ? "human" : "ai");
 
-  agoraService.publishSignalling(callId, 'call_ended', {
+  // Stop any active Agora Conversational AI Agent session for this channel/call
+  if (call.channelName) {
+    await agentWorker.stopSession(call.channelName).catch(() => undefined);
+  }
+
+  agoraService.publishSignalling(callId, "call_ended", {
     callId,
+    durationSeconds: ended?.durationSeconds ?? null,
+    escalated: call.escalated,
+  });
+
+  logVoiceDiagnostic("CALL_ENDED", {
+    callId,
+    channelName: call.channelName,
+    agentId: call.agentId || undefined,
     durationSeconds: ended?.durationSeconds ?? null,
     escalated: call.escalated,
   });
