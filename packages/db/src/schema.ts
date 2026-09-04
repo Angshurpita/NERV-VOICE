@@ -82,6 +82,8 @@ CREATE TABLE IF NOT EXISTS calls (
   caller_name        TEXT,
   caller_phone       TEXT,
   channel_name       TEXT,
+  agent_id           TEXT,
+  agent_rtc_uid      INTEGER,
   language           TEXT NOT NULL DEFAULT 'en',
   code_switched      BOOLEAN NOT NULL DEFAULT FALSE,
   status             TEXT NOT NULL DEFAULT 'active',
@@ -100,6 +102,7 @@ CREATE TABLE IF NOT EXISTS calls (
 );
 CREATE INDEX IF NOT EXISTS calls_status_idx ON calls(status);
 CREATE INDEX IF NOT EXISTS calls_started_idx ON calls(started_at DESC);
+CREATE INDEX IF NOT EXISTS calls_channel_idx ON calls(channel_name);
 
 CREATE TABLE IF NOT EXISTS transcripts (
   id         TEXT PRIMARY KEY,

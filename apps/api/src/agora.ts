@@ -1,15 +1,9 @@
 import agoraToken from 'agora-token';
 import { EventEmitter } from 'node:events';
-import {
-  AgoraClient,
-  Agent,
-  Area,
-  DeepgramSTT,
-  Gemini,
-  MiniMaxTTS,
-  type AgentSession,
-} from 'agora-agents';
-import { config } from './config.js';
+import { getDatabase } from '@echosphere/db';
+import type { LanguageCode } from '@echosphere/core';
+import { config, getSystemStatus } from './config.js';
+import { agentWorker } from './agent-worker.js';
 
 const {
   RtcRole,
@@ -33,7 +27,14 @@ export interface AgoraChannelTokens {
 export interface SignallingEvent {
   id: string;
   callId: string;
-  event: 'call_started' | 'caller_utterance' | 'gemini_thinking' | 'agent_reply' | 'escalation_triggered' | 'call_ended' | 'ping';
+  event:
+    | 'call_started'
+    | 'caller_utterance'
+    | 'gemini_thinking'
+    | 'agent_reply'
+    | 'escalation_triggered'
+    | 'call_ended'
+    | 'ping';
   payload: Record<string, unknown>;
   timestamp: string;
 }
@@ -41,28 +42,17 @@ export interface SignallingEvent {
 class AgoraService {
   private readonly emitter = new EventEmitter();
   private readonly recentEvents: SignallingEvent[] = [];
-  private readonly activeSessions = new Map<string, AgentSession>();
-  private agentClient: AgoraClient | null = null;
 
   constructor() {
     this.emitter.setMaxListeners(100);
   }
 
-  private getAgentClient(): AgoraClient {
-    if (!this.agentClient) {
-      this.agentClient = new AgoraClient({
-        appId: config.agora.appId,
-        appCertificate: config.agora.appCertificate,
-        customerId: config.agora.customerId,
-        customerSecret: config.agora.customerSecret,
-        area: Area.US,
-      });
-    }
-    return this.agentClient;
-  }
-
   get isConfigured(): boolean {
     return Boolean(config.agora.appId && config.agora.appCertificate);
+  }
+
+  get cloudAgentConfigured(): boolean {
+    return config.agora.cloudAgentEnabled;
   }
 
   /**
@@ -98,7 +88,6 @@ class AgoraService {
 
     let sttToken: string | undefined;
     try {
-      // 3. Agora SST / Realtime STT Token
       sttToken = SttTokenBuilder.buildToken(
         config.agora.appId,
         config.agora.appCertificate,
@@ -114,13 +103,11 @@ class AgoraService {
         expiresAt,
       );
     } catch {
-      // Fall back gracefully if specialized service constructor differs
       sttToken = undefined;
     }
 
     let convoAiToken: string | undefined;
     try {
-      // 4. Agora Conversational AI Unified Token
       convoAiToken = ConvoAITokenBuilder.buildToken(
         config.agora.appId,
         config.agora.appCertificate,
@@ -196,12 +183,13 @@ class AgoraService {
   }
 
   /**
-   * Starts an Agora Cloud Conversational AI Agent in the RTC channel.
+   * Starts an Agora Cloud Conversational AI Agent via the persistent Agent Worker.
    */
   async startConversationalAgent(
     channelName: string,
-    language: string = 'en',
+    language: LanguageCode = 'en',
     customGreeting?: string,
+    explicitCallId?: string,
   ) {
     if (!config.agora.cloudAgentEnabled) {
       return {
@@ -211,128 +199,64 @@ class AgoraService {
       };
     }
 
-    // Stop any existing session on this channel first
-    const existing = this.activeSessions.get(channelName);
-    if (existing) {
+    // Resolve callId from database or channel name
+    let callId = explicitCallId;
+    if (!callId) {
       try {
-        await existing.stop();
+        const db = await getDatabase(config.DATABASE_URL);
+        const call = await db.calls.findByChannel(channelName);
+        if (call) {
+          callId = call.id;
+        }
       } catch {
         // ignore
       }
-      this.activeSessions.delete(channelName);
+    }
+    if (!callId) {
+      callId = channelName.startsWith('nerv_') ? channelName.slice(5) : channelName;
     }
 
-    const agentRtcUid = 10001;
-    const isHindi = language === 'hi';
-    const greetingText =
-      customGreeting ||
-      (isHindi
-        ? 'नमस्ते, कॉल करने के लिए धन्यवाद। मैं आपके ऑर्डर की स्थिति जाँचने, डिलीवरी या प्रोडक्ट से जुड़ी समस्या में मदद करने, या आपको कस्टमर सर्विस एजेंट से जोड़ने में मदद कर सकता हूँ। बताइए, कैसे मदद करूँ?'
-        : 'Hi, thanks for calling. I can help you check your order status, assist with delivery or product issues, or connect you with a customer service agent. How can I help today?');
-
-    const instructions = `You are the official Voice Agent for customer support at Nerv, an Indian e-commerce company.
-You are interacting on a live Agora RTC voice call.
-- Keep your answers brief, human, and conversational (1 to 2 sentences max).
-- Speak in ${isHindi ? 'Hindi' : 'English'}.
-- Help customers with order status, returns, cancellations, and inquiries.
-- If the customer asks for a human agent or requires complex resolution, inform them politely that you are connecting them to human support.
-- Do not independently answer caller audio. The Nerv backend owns policy, order verification, escalation, and every reply. Only speak text explicitly sent through the session.`;
-
-    try {
-      const client = this.getAgentClient();
-      const agent = new Agent({
-        client,
-        instructions,
-        greeting: greetingText,
-      })
-        .withStt(new DeepgramSTT({ model: 'nova-2', language: isHindi ? 'hi' : 'en-US' }))
-        .withLlm(
-          new Gemini({
-            apiKey: config.gemini.apiKey,
-            model: config.gemini.model,
-            maxHistory: 1,
-            temperature: 0.3,
-            maxOutputTokens: 512,
-            systemMessages: [
-              {
-                role: 'system',
-                content:
-                  'Do not independently answer caller audio. The Nerv backend owns policy, order verification, escalation, and every reply. Only speak text explicitly sent through the session.',
-              },
-            ],
-          }),
-        )
-        // Agora-managed MiniMax publishes a remote RTC audio track. There is
-        // no browser TTS or Web Audio substitute for this path.
-        .withTts(new MiniMaxTTS({ model: 'speech-2.6-turbo' }));
-
-      const session = agent.createSession({
-        channel: channelName,
-        agentUid: String(agentRtcUid),
-        remoteUids: ['*'],
-      });
-
-      const agentId = await session.start();
-      this.activeSessions.set(channelName, session);
-
-      this.publishSignalling(channelName, 'agent_reply', {
-        reply: greetingText,
-        source: 'agora_cloud_agent',
-        agentId,
-      });
-
-      return {
-        ok: true,
-        agentId,
-        agentRtcUid,
-        channelName,
-        greeting: greetingText,
-      };
-    } catch (e: any) {
-      console.error('[AgoraService] Failed to start Conversational AI Agent:', e);
-      return { ok: false, error: e.message };
-    }
+    return agentWorker.startSession({
+      callId,
+      channelName,
+      language,
+      customGreeting,
+    });
   }
 
   /**
    * Sends text to be spoken into the channel by the Agora Cloud Conversational AI Agent.
    */
   async speakConversationalAgent(channelName: string, text: string) {
-    const session = this.activeSessions.get(channelName);
-    if (!session) {
-      return { ok: false, message: 'No active Agora agent session found for channel.' };
-    }
-
-    try {
-      await session.say(text);
-      this.publishSignalling(channelName, 'agent_reply', {
-        reply: text,
-        source: 'agora_cloud_agent',
-      });
-      return { ok: true };
-    } catch (e: any) {
-      console.error('[AgoraService] Failed to make agent speak:', e);
-      return { ok: false, error: e.message };
-    }
+    return agentWorker.speak(channelName, text);
   }
 
   /**
-   * Stops an Agora Cloud Conversational AI Agent.
+   * Stops an Agora Cloud Conversational AI Agent session cleanly.
    */
   async stopConversationalAgent(channelName: string, _agentName?: string) {
-    const session = this.activeSessions.get(channelName);
-    if (!session) {
-      return { ok: true, message: 'No active session to stop.' };
-    }
+    return agentWorker.stopSession(channelName);
+  }
 
-    try {
-      await session.stop();
-    } catch (e: any) {
-      console.warn('[AgoraService] Agent session stop notice:', e.message);
-    } finally {
-      this.activeSessions.delete(channelName);
-    }
-    return { ok: true };
+  /**
+   * Get detailed health and capability status.
+   */
+  getStatus() {
+    const sys = getSystemStatus();
+    return {
+      enabled: this.isConfigured,
+      appId: config.agora.appId ? `${config.agora.appId.slice(0, 6)}...` : null,
+      capabilities: {
+        voiceRtc: sys.agora.voiceRtc,
+        speechToTextSst: sys.agora.speechToTextSst,
+        conversationalAi: sys.agora.conversationalAi,
+        signallingRtm: sys.agora.signallingRtm,
+        cloudAgentConfigured: sys.agora.cloudAgent,
+        agentWorkerRunning: true,
+      },
+      activeSessions: agentWorker.getActiveCount(),
+      system: sys,
+    };
   }
 }
 

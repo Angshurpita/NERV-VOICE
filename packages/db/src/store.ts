@@ -213,8 +213,19 @@ import path from 'node:path';
 // ── Memory ────────────────────────────────────────────────────────────────────
 
 function getDevStorePath(): string {
+  if (process.env.DEV_STORE_PATH) {
+    return path.resolve(process.env.DEV_STORE_PATH);
+  }
   const cwd = process.cwd();
-  return path.resolve(cwd, '.data', 'dev-store.json');
+  const candidates = [
+    path.resolve(cwd, '.data', 'dev-store.json'),
+    path.resolve(cwd, 'apps', 'api', '.data', 'dev-store.json'),
+    path.resolve(cwd, '..', '.data', 'dev-store.json'),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return candidates[0];
 }
 
 export class MemoryStore implements Store {

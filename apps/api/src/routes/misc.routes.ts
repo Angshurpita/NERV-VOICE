@@ -5,6 +5,7 @@ import { assessReturn, evaluateCancellation, humanStatus } from '@echosphere/cor
 import { attachUser, requireRole } from '../auth.js';
 import { config, policy } from '../config.js';
 import { agoraService } from '../agora.js';
+import { handleTurn } from '../conversation.js';
 
 /**
  * `agora-token` is CommonJS, so it exposes no named ESM bindings — importing
@@ -113,18 +114,132 @@ catalogueRouter.get('/orders/:id/policy', attachUser, requireRole('agent'), asyn
 export const agoraRouter = Router();
 
 agoraRouter.get('/status', (_req, res) => {
-  res.json({
-    enabled: agoraService.isConfigured,
-    appId: config.agora.appId || null,
-    agentId: config.agora.agentId || '9d9ba5ddc6f6448e8bfc1881f13f777c',
-    capabilities: {
-      voiceRtc: agoraService.isConfigured,
-      speechToTextSst: agoraService.isConfigured,
-      conversationalAi: agoraService.isConfigured,
-      signallingRtm: agoraService.isConfigured,
-    },
-  });
+  res.json(agoraService.getStatus());
 });
+
+/**
+ * Custom LLM endpoint for the real Agora Conversational AI Agent.
+ *
+ * When caller speaks into Agora RTC, Deepgram STT recognized speech is sent here.
+ * EchoSphere processes it through the authoritative runTurn engine and returns the official reply.
+ * Agora Agent synthesizes this reply via MiniMax TTS into RTC audio for the caller.
+ */
+const chatCompletionHandler = async (req: any, res: any) => {
+  try {
+    const messages = Array.isArray(req.body?.messages) ? req.body.messages : [];
+    const userMsg = [...messages].reverse().find((m: any) => m.role === 'user');
+    const userUtterance = typeof userMsg?.content === 'string' ? userMsg.content.trim() : '';
+
+    let callId =
+      (typeof req.query?.callId === 'string' && req.query.callId) ||
+      (typeof req.body?.callId === 'string' && req.body.callId) ||
+      (typeof req.headers?.['x-call-id'] === 'string' && req.headers['x-call-id']) ||
+      undefined;
+    const channelName =
+      (typeof req.query?.channel === 'string' && req.query.channel) ||
+      (typeof req.body?.channel === 'string' && req.body.channel) ||
+      (typeof req.headers?.['x-channel-name'] === 'string' && req.headers['x-channel-name']) ||
+      undefined;
+
+    if (!callId && channelName) {
+      const db = await getDatabase(config.DATABASE_URL);
+      const call = await db.calls.findByChannel(channelName);
+      if (call) callId = call.id;
+    }
+
+    if (!callId) {
+      const db = await getDatabase(config.DATABASE_URL);
+      const activeCalls = await db.calls.list({ status: 'active', limit: 1 });
+      if (activeCalls.length > 0) {
+        callId = activeCalls[0].id;
+      }
+    }
+
+    if (!callId) {
+      res.status(400).json({ error: 'No active call associated with this turn' });
+      return;
+    }
+
+    if (!userUtterance) {
+      res.json({
+        id: `chatcmpl-${Date.now()}`,
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        model: req.body?.model || 'echosphere-authoritative-brain',
+        choices: [
+          {
+            index: 0,
+            message: { role: 'assistant', content: 'Hello, how can I help you today?' },
+            finish_reason: 'stop',
+          },
+        ],
+      });
+      return;
+    }
+
+    const outcome = await handleTurn({
+      callId,
+      text: userUtterance,
+      asrConfidence: 0.95,
+    });
+
+    const reply = 'reply' in outcome ? outcome.reply : 'I am looking into that for you.';
+
+    if (req.body?.stream) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.write(
+        `data: ${JSON.stringify({
+          id: `chatcmpl-${Date.now()}`,
+          object: 'chat.completion.chunk',
+          created: Math.floor(Date.now() / 1000),
+          model: req.body?.model || 'echosphere-authoritative-brain',
+          choices: [{ index: 0, delta: { role: 'assistant', content: reply }, finish_reason: null }],
+        })}\n\n`,
+      );
+      res.write(
+        `data: ${JSON.stringify({
+          id: `chatcmpl-${Date.now()}`,
+          object: 'chat.completion.chunk',
+          created: Math.floor(Date.now() / 1000),
+          model: req.body?.model || 'echosphere-authoritative-brain',
+          choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+        })}\n\n`,
+      );
+      res.write('data: [DONE]\n\n');
+      res.end();
+      return;
+    }
+
+    res.json({
+      id: `chatcmpl-${Date.now()}`,
+      object: 'chat.completion',
+      created: Math.floor(Date.now() / 1000),
+      model: req.body?.model || 'echosphere-authoritative-brain',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: reply },
+          finish_reason: 'stop',
+        },
+      ],
+      usage: {
+        prompt_tokens: userUtterance.length,
+        completion_tokens: reply.length,
+        total_tokens: userUtterance.length + reply.length,
+      },
+    });
+  } catch (err: any) {
+    console.error('[agora/chat/completions] Error handling LLM turn:', err);
+    res.status(500).json({
+      error: { message: err.message, type: 'internal_error' },
+    });
+  }
+};
+
+agoraRouter.post('/openai/v1/chat/completions', chatCompletionHandler);
+agoraRouter.post('/chat/completions', chatCompletionHandler);
 
 agoraRouter.post('/channel', (req, res) => {
   if (!agoraService.isConfigured) {
@@ -149,12 +264,17 @@ agoraRouter.post('/channel', (req, res) => {
 });
 
 agoraRouter.post('/agent/start', async (req, res) => {
-  const { channelName, language, greeting } = req.body ?? {};
+  const { channelName, language, greeting, callId } = req.body ?? {};
   if (!channelName) {
     res.status(400).json({ error: 'Missing channelName' });
     return;
   }
-  const result = await agoraService.startConversationalAgent(channelName, language ?? 'en', greeting);
+  const result = await agoraService.startConversationalAgent(
+    channelName,
+    language ?? 'en',
+    greeting,
+    callId,
+  );
   if (!result.ok) {
     res.status(503).json(result);
     return;
@@ -163,12 +283,13 @@ agoraRouter.post('/agent/start', async (req, res) => {
 });
 
 agoraRouter.post('/agent/say', async (req, res) => {
-  const { channelName, text } = req.body ?? {};
-  if (!channelName || !text) {
+  const { channelName, text, callId } = req.body ?? {};
+  const target = channelName || callId;
+  if (!target || !text) {
     res.status(400).json({ error: 'Missing channelName or text' });
     return;
   }
-  const result = await agoraService.speakConversationalAgent(channelName, String(text));
+  const result = await agoraService.speakConversationalAgent(target, String(text));
   if (!result.ok) {
     res.status(503).json(result);
     return;
@@ -177,12 +298,13 @@ agoraRouter.post('/agent/say', async (req, res) => {
 });
 
 agoraRouter.post('/agent/stop', async (req, res) => {
-  const { channelName, agentName } = req.body ?? {};
-  if (!channelName) {
-    res.status(400).json({ error: 'Missing channelName' });
+  const { channelName, agentName, callId } = req.body ?? {};
+  const target = channelName || callId;
+  if (!target) {
+    res.status(400).json({ error: 'Missing channelName or callId' });
     return;
   }
-  const result = await agoraService.stopConversationalAgent(channelName, agentName);
+  const result = await agoraService.stopConversationalAgent(target, agentName);
   res.json(result);
 });
 

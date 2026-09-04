@@ -87,6 +87,16 @@ router.post('/:id/end', async (req, res) => {
   res.json({ ok: true, durationSeconds: call.durationSeconds, caseRef: call.caseRef });
 });
 
+router.get('/by-channel/:channel', async (req, res) => {
+  const db = await getDatabase(config.DATABASE_URL);
+  const call = await db.calls.findByChannel(req.params.channel);
+  if (!call) {
+    res.status(404).json({ error: 'Call not found' });
+    return;
+  }
+  res.json({ callId: call.id, caseRef: call.caseRef, channelName: call.channelName });
+});
+
 // ── Staff reads ───────────────────────────────────────────────────────────────
 
 router.get('/', attachUser, requireRole('agent'), async (req, res) => {

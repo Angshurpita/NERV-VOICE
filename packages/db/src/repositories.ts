@@ -285,6 +285,8 @@ export class CallRepository {
       callerName: input.callerName ?? null,
       callerPhone: input.callerPhone ?? null,
       channelName: input.channelName ?? null,
+      agentId: null,
+      agentRtcUid: null,
       language: input.language,
       codeSwitched: false,
       status: 'active',
@@ -305,6 +307,28 @@ export class CallRepository {
 
   findById(id: string): Promise<CallRow | null> {
     return this.store.findById<CallRow>(TABLES.calls, id);
+  }
+
+  async findByChannel(channelName: string): Promise<CallRow | null> {
+    const rows = await this.store.findMany<CallRow>(
+      TABLES.calls,
+      { channelName },
+      { limit: 1, orderBy: { column: 'startedAt', direction: 'desc' } },
+    );
+    return rows[0] ?? null;
+  }
+
+  async updateAgent(id: string, agentId: string, agentRtcUid: number): Promise<CallRow | null> {
+    return this.store.update<CallRow>(TABLES.calls, id, {
+      agentId,
+      agentRtcUid,
+    });
+  }
+
+  async updateChannel(id: string, channelName: string): Promise<CallRow | null> {
+    return this.store.update<CallRow>(TABLES.calls, id, {
+      channelName,
+    });
   }
 
   /** Persist the engine state plus the denormalised columns the dashboard reads. */

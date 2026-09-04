@@ -74,6 +74,8 @@ export interface CallRow {
   callerName: string | null;
   callerPhone: string | null;
   channelName: string | null;
+  agentId: string | null;
+  agentRtcUid: number | null;
   language: LanguageCode;
   codeSwitched: boolean;
   status: CallStatus;

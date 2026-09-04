@@ -223,34 +223,6 @@ function LoginPage() {
             </Button>
           </form>
 
-          {mode === "signin" && (
-            <div className="mt-4 rounded-lg border border-border/60 bg-muted/40 p-3 text-[11.5px]">
-              <p className="font-semibold text-muted-foreground uppercase tracking-wider text-[10px] mb-2">Demo Credentials</p>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEmail("admin@nerv.dev");
-                    setPassword("Echosphere123");
-                  }}
-                  className="flex-1 rounded border border-border bg-card px-2 py-1 text-center font-medium hover:bg-accent transition-colors"
-                >
-                  Admin: admin@nerv.dev
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEmail("rohit.verma@nerv.dev");
-                    setPassword("Echosphere123");
-                  }}
-                  className="flex-1 rounded border border-border bg-card px-2 py-1 text-center font-medium hover:bg-accent transition-colors"
-                >
-                  Agent: rohit.verma@nerv.dev
-                </button>
-              </div>
-            </div>
-          )}
-
           <div className="mt-5 border-t border-border pt-4 text-center">
             <p className="text-[12.5px] text-muted-foreground">
               {mode === "signin"

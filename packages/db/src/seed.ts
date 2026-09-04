@@ -3,6 +3,9 @@ import { TABLES, type Database } from './index.js';
 import { cryptoRandomId } from './store.js';
 
 export async function ensureSeedData(db: Database): Promise<void> {
+  const userCount = await db.users.count();
+  if (userCount > 0) return;
+
   const now = new Date();
   const daysAgo = (d: number, hours = 0) => {
     const dt = new Date(now.getTime() - (d * 86400000) - (hours * 3600000));
@@ -17,7 +20,6 @@ export async function ensureSeedData(db: Database): Promise<void> {
     { email: 'priya.nair@nerv.dev', fullName: 'Priya Nair', role: 'supervisor' as const, avatarColor: 'emerald' },
     { email: 'rohit.verma@nerv.dev', fullName: 'Rohit Verma', role: 'agent' as const, avatarColor: 'amber' },
     { email: 'ananya.sen@nerv.dev', fullName: 'Ananya Sen', role: 'agent' as const, avatarColor: 'rose' },
-    { email: 'admin@echosphere.dev', fullName: 'Ops Admin', role: 'admin' as const, avatarColor: 'indigo' },
   ];
 
   const userMap = new Map<string, string>();
@@ -41,16 +43,11 @@ export async function ensureSeedData(db: Database): Promise<void> {
         createdAt: daysAgo(30),
         lastLoginAt: daysAgo(0, 1),
       });
-    } else {
-      await db.store.update(TABLES.users, existing.id, {
-        passwordHash: defaultHash,
-        isActive: true,
-      });
     }
     if (existing) {
       userMap.set(s.email, existing.id);
     }
   }
 
-  console.log('[seed] Successfully ensured initial staff users with active credentials.');
+  console.log('[seed] Successfully seeded initial staff users.');
 }

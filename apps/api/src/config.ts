@@ -64,6 +64,13 @@ const CORS_ORIGINS = str('CORS_ORIGINS', 'http://localhost:3000,http://localhost
   .map((o) => o.trim())
   .filter(Boolean);
 
+const PUBLIC_URL = str('PUBLIC_URL') || str('VERCEL_URL') || str('BACKEND_URL');
+const formattedPublicUrl = PUBLIC_URL
+  ? PUBLIC_URL.startsWith('http')
+    ? PUBLIC_URL.replace(/\/$/, '')
+    : `https://${PUBLIC_URL.replace(/\/$/, '')}`
+  : '';
+
 export const config = {
   NODE_ENV,
   IS_PRODUCTION,
@@ -72,6 +79,7 @@ export const config = {
   CORS_ORIGINS,
   AUTH_SECRET,
   SESSION_TTL_DAYS: num('SESSION_TTL_DAYS', 30),
+  PUBLIC_URL: formattedPublicUrl,
 
   gemini: {
     apiKey: str('GEMINI_API_KEY'),
@@ -85,9 +93,16 @@ export const config = {
     customerId: str('AGORA_CUSTOMER_ID'),
     customerSecret: str('AGORA_CUSTOMER_SECRET'),
     tokenTtlSeconds: num('AGORA_RTC_TOKEN_TTL', 3600),
-    agentId: str('AGORA_AGENT_ID', '9d9ba5ddc6f6448e8bfc1881f13f777c'),
+    hasCredentials: Boolean(str('AGORA_APP_ID') && str('AGORA_APP_CERTIFICATE')),
+    hasCustomerCredentials: Boolean(str('AGORA_CUSTOMER_ID') && str('AGORA_CUSTOMER_SECRET')),
     enabled: Boolean(str('AGORA_APP_ID') && str('AGORA_APP_CERTIFICATE')),
-    cloudAgentEnabled: Boolean(str('AGORA_CUSTOMER_ID') && str('AGORA_CUSTOMER_SECRET')),
+    cloudAgentEnabled: Boolean(
+      str('AGORA_APP_ID') &&
+      str('AGORA_APP_CERTIFICATE') &&
+      str('AGORA_CUSTOMER_ID') &&
+      str('AGORA_CUSTOMER_SECRET')
+    ),
+    llmUrl: str('AGORA_LLM_URL') || (formattedPublicUrl ? `${formattedPublicUrl}/api/agora/openai/v1/chat/completions` : ''),
   },
 
   /** Seed a first admin so a fresh install is usable. Disable in production. */
@@ -125,6 +140,38 @@ export function describeConfig(): string[] {
     lines.push('WARNING: Gemini API key not set — AI responses will use templates only');
   }
   lines.push(`agora rtc        ${config.agora.enabled ? 'enabled' : 'disabled'}`);
+  lines.push(`agora cloud agt  ${config.agora.cloudAgentEnabled ? 'enabled' : 'disabled'}`);
   lines.push(`escalate after   ${policy.humanRequestsBeforeHandover} requests for a human`);
   return lines;
+}
+
+/** Detailed health status distinguishing credentials, agents, model, and db. */
+export function getSystemStatus() {
+  return {
+    environment: config.NODE_ENV,
+    isProduction: config.IS_PRODUCTION,
+    agora: {
+      hasCredentials: config.agora.hasCredentials,
+      hasCustomerCredentials: config.agora.hasCustomerCredentials,
+      voiceRtc: config.agora.hasCredentials,
+      cloudAgent: config.agora.cloudAgentEnabled,
+      speechToTextSst: config.agora.hasCredentials,
+      conversationalAi: config.agora.cloudAgentEnabled,
+      signallingRtm: config.agora.hasCredentials,
+      appId: config.agora.appId ? `${config.agora.appId.slice(0, 6)}...` : null,
+      llmBridgeMode: config.agora.llmUrl ? 'custom_llm_endpoint' : 'worker_speech_bridge',
+    },
+    brain: {
+      model: config.gemini.model,
+      enabled: config.gemini.enabled,
+    },
+    database: {
+      kind: config.DATABASE_URL ? ('postgres' as const) : ('memory' as const),
+      persistent: Boolean(config.DATABASE_URL),
+    },
+    ticketing: {
+      enabled: true,
+      escalateAfter: policy.humanRequestsBeforeHandover,
+    },
+  };
 }

@@ -30,6 +30,7 @@ export interface StartCallResult {
   caseRef: string;
   greeting: string;
   language: LanguageCode;
+  channelName: string;
 }
 
 export async function startCall(input: {
@@ -40,10 +41,11 @@ export async function startCall(input: {
 }): Promise<StartCallResult> {
   const db = await getDatabase(config.DATABASE_URL);
   const language = input.language ?? 'en';
+  const channelName = input.channelName ?? `nerv_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
   const call = await db.calls.create({
     language,
-    channelName: input.channelName ?? null,
+    channelName,
     callerName: input.callerName ?? null,
     callerPhone: input.callerPhone ?? null,
     state: createState('pending'),
@@ -65,11 +67,16 @@ export async function startCall(input: {
   agoraService.publishSignalling(call.id, 'call_started', {
     callId: call.id,
     caseRef: call.caseRef,
-    channelName: input.channelName ?? `nerv_${call.id}`,
+    channelName,
     language,
   });
 
-  return { callId: call.id, caseRef: call.caseRef, greeting: opening, language };
+  return { callId: call.id, caseRef: call.caseRef, greeting: opening, language, channelName };
+}
+
+export async function findCallByChannel(channelName: string): Promise<CallRow | null> {
+  const db = await getDatabase(config.DATABASE_URL);
+  return db.calls.findByChannel(channelName);
 }
 
 export interface TurnOutcome {

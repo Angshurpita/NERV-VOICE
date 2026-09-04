@@ -10,13 +10,14 @@
   "scripts": {
     "dev": "vite dev --port 3000",
     "dev:api": "npm run dev --workspace @echosphere/api",
-    "dev:all": "concurrently -n api,dashboard -c cyan,magenta \"npm:dev:api\" \"npm:dev\"",
+    "dev:caller": "npm run dev --workspace @echosphere/caller",
+    "dev:all": "concurrently -n api,dashboard,caller -c cyan,magenta,green \"npm:dev:api\" \"npm:dev\" \"npm:dev:caller\"",
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "test": "npm run test --workspace @echosphere/core",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit && npm run typecheck --workspace @echosphere/api",
     "db:migrate": "npm run migrate --workspace @echosphere/db",
     "db:seed": "npm run seed --workspace @echosphere/db"
