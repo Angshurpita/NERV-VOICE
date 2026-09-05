@@ -3,6 +3,7 @@ import { combineAsrAndExtraction } from "./confidence.js";
 import {
   advanceTurn,
   applyConfirmation,
+  buildConversationStateSummary,
   createState,
   noteExecutedAction,
   noteHumanRequest,
@@ -50,6 +51,7 @@ import {
 import type {
   ConversationEvent,
   ConversationState,
+  FormattedConversationState,
   IntentKey,
   LanguageCode,
   Order,
@@ -98,6 +100,7 @@ export interface TurnResult {
   /** The order in hand this turn, if verified. */
   order: Order | null;
   events: ConversationEvent[];
+  stateSummary?: FormattedConversationState;
 }
 
 export interface TurnInput {
@@ -413,6 +416,11 @@ export async function runTurn(
     escalation: decision.required ? decision : null,
     order,
     events,
+    stateSummary: buildConversationStateSummary(
+      state,
+      order,
+      decision.required ? "ESCALATE" : "CONTINUE",
+    ),
   };
 }
 

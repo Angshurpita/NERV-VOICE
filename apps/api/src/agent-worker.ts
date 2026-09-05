@@ -2,8 +2,11 @@ import {
   AgoraClient,
   Agent,
   Area,
+  AresSTT,
   DeepgramSTT,
   DeepgramTTS,
+  OpenAI,
+  OpenAITTS,
   CustomLLM,
   type AgentSession,
 } from "agora-agents";
@@ -115,22 +118,9 @@ export class AgentWorker {
       };
     }
 
-    // Determine the authoritative EchoSphere CustomLLM endpoint.
-    // In production and real voice calls, Agora Cloud Agent calls back to this URL.
+    // Determine the EchoSphere CustomLLM endpoint if available and public
     const baseLlmUrl = config.agora.llmUrl;
-
-    if (!baseLlmUrl) {
-      const err =
-        "Cannot start Agora Conversational Agent: PUBLIC_URL or AGORA_LLM_URL must be configured so Agora can route recognized caller speech to EchoSphere CustomLLM endpoint.";
-      logVoiceDiagnostic("PIPELINE_ERROR", { callId, channelName, error: err });
-      return { ok: false, error: err };
-    }
-
-    if (config.IS_PRODUCTION && isPrivateOrLocalhostUrl(baseLlmUrl)) {
-      const err = `Cannot start Agora Conversational Agent: CustomLLM URL "${baseLlmUrl}" points to localhost or a private network which Agora cloud cannot reach in production. Configure a public HTTPS URL.`;
-      logVoiceDiagnostic("PIPELINE_ERROR", { callId, channelName, error: err });
-      return { ok: false, error: err };
-    }
+    const useCustomLlm = Boolean(baseLlmUrl && !isPrivateOrLocalhostUrl(baseLlmUrl));
 
     // Stop any previous active session for this call or channel
     await this.stopSession(callId);
@@ -138,12 +128,6 @@ export class AgentWorker {
 
     const agentRtcUid = this.generateUniqueAgentUid();
     const sessionId = `sess_${callId}_${Date.now()}`;
-
-    const greetingText =
-      input.customGreeting ||
-      (isHindi
-        ? "नमस्ते, कॉल करने के लिए धन्यवाद। मैं आपके ऑर्डर की स्थिति जाँचने, डिलीवरी या प्रोडक्ट से जुड़ी समस्या में मदद करने, या आपको कस्टमर सर्विस एजेंट से जोड़ने में मदद कर सकता हूँ। बताइए, कैसे मदद करूँ?"
-        : "Hi, thanks for calling. I can help you check your order status, assist with delivery or product issues, or connect you with a customer service agent. How can I help today?");
 
     try {
       const client = this.getClient();
@@ -157,7 +141,7 @@ export class AgentWorker {
         targetLlmUrl,
       });
 
-      const agent = new Agent({
+      let agent = new Agent({
         client,
         turnDetection: {
           language: isHindi ? "hi-IN" : "en-US",
@@ -186,20 +170,33 @@ export class AgentWorker {
           enable_error_message: true,
         },
       })
-        // 1. STT: Real Deepgram speech recognition
+        // 1. STT: Agora Ares ASR (Agora-managed, matches Agora Console)
         .withStt(
-          new DeepgramSTT({
-            model: (isHindi
-              ? config.deepgram.sttHindiModel
-              : config.deepgram.sttModel) as any,
-            language: isHindi ? "hi" : "en-US",
-            ...(config.deepgram.apiKey
-              ? { apiKey: config.deepgram.apiKey }
-              : {}),
+          new AresSTT({
+            keywords: [
+              "order",
+              "delivery",
+              "problem",
+              "help",
+              "agent",
+              "cancel",
+              "refund",
+              "status",
+              "track",
+            ],
           }),
         )
-        // 2. LLM: Authoritative EchoSphere CustomLLM Endpoint (NO local Gemini fallback)
-        .withLlm(
+        // 2. TTS: OpenAI TTS with Sage voice (Agora-managed preset, matches Agora Console)
+        .withTts(
+          new OpenAITTS({
+            voice: "sage",
+          }),
+        );
+
+      // 3. LLM: Either CustomLLM (when public URL provided) or Agora-managed OpenAI preset
+      // The agent created in Agora already has its welcome message configured, so do NOT override unless explicitly passed
+      if (useCustomLlm) {
+        agent = agent.withLlm(
           new CustomLLM({
             apiKey: config.AUTH_SECRET,
             model: config.gemini.model,
@@ -214,19 +211,27 @@ export class AgentWorker {
               {
                 role: "system",
                 content:
-                  "You are the EchoSphere customer support voice relay. The EchoSphere core engine owns all order decisions, verification, and policies.",
+                  "You are the Nerv customer support voice assistant. Help callers with their order tracking, delivery issues, refunds, and human escalation.",
               },
             ],
-            greetingMessage: greetingText,
-          }),
-        )
-        // 3. TTS: Deepgram Aura TTS (Aura-2 Thalia / configured Aura voice)
-        .withTts(
-          new DeepgramTTS({
-            apiKey: config.deepgram.apiKey || "",
-            model: config.deepgram.ttsModel,
+            ...(input.customGreeting ? { greetingMessage: input.customGreeting } : {}),
           }),
         );
+      } else {
+        agent = agent.withLlm(
+          new OpenAI({
+            model: "gpt-4o-mini",
+            systemMessages: [
+              {
+                role: "system",
+                content:
+                  "You are the voice support agent for Nerv e-commerce customer service. Speak concisely, clearly, and helpfully. Assist callers with order tracking, delivery issues, cancellations, and returns.",
+              },
+            ],
+            ...(input.customGreeting ? { greetingMessage: input.customGreeting } : {}),
+          }),
+        );
+      }
 
       // Create isolated session with unique agent RTC UID
       const session = agent.createSession({
@@ -270,11 +275,9 @@ export class AgentWorker {
         channelName,
         agentId,
         agentRtcUid,
-        sttModel: isHindi
-          ? config.deepgram.sttHindiModel
-          : config.deepgram.sttModel,
-        ttsModel: config.deepgram.ttsModel,
-        llmUrl: targetLlmUrl,
+        sttModel: "agora-ares",
+        ttsModel: "openai-tts-1-sage",
+        llmUrl: useCustomLlm ? targetLlmUrl : "openai_gpt_4o_mini",
       });
 
       logVoiceDiagnostic("AGORA_AGENT_JOINED", {
@@ -289,7 +292,7 @@ export class AgentWorker {
         agentId,
         agentRtcUid,
         channelName,
-        greeting: greetingText,
+        greeting: input.customGreeting || "",
       };
     } catch (err: any) {
       logVoiceDiagnostic("PIPELINE_ERROR", {

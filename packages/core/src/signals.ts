@@ -16,6 +16,7 @@ import type { LanguageCode } from "./types.js";
 const HUMAN_REQUEST: readonly RegExp[] = [
   // English
   /\b(human|real person|actual person|live agent|customer care executive)\b/i,
+  /\b(transfer|call transfer|transfer call|transfer me|handover|hand over)\b/i,
   /\b(speak|talk|connect|transfer|put me through)\b[^.?!]{0,30}\b(agent|representative|rep|manager|supervisor|someone|somebody|person)\b/i,
   /\b(agent|representative|manager|supervisor)\b[^.?!]{0,20}\b(please|now|right now)\b/i,
   /\b(escalate|escalation)\b/i,
@@ -25,7 +26,7 @@ const HUMAN_REQUEST: readonly RegExp[] = [
   /\b(baat\s*kara?o|baat\s*karwao|connect\s*kar[oa]|transfer\s*kar[oa])\b/i,
   // Devanagari
   /(इंसान|आदमी|प्रतिनिधि|मैनेजर|सुपरवाइज़र|सुपरवाइजर)/,
-  /(किसी\s*से\s*बात|बात\s*कराओ|बात\s*करवाओ|सीनियर\s*से)/,
+  /(किसी\s*से\s*बात|बात\s*कराओ|बात\s*करवाओ|सीनियर\s*से|ट्रांसफर)/,
 ];
 
 /** Phrases that mean "I do not want your help", not merely "I want a human". */

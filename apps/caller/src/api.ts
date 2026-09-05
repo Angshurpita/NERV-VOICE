@@ -27,6 +27,36 @@ export interface VerificationState {
   attempts: number;
 }
 
+export interface FormattedConversationState {
+  intent: {
+    key: string;
+    label: string;
+    confidence: number;
+    confidencePercent: number;
+  };
+  language: {
+    primary: LanguageCode;
+    display: string;
+    codeSwitched: boolean;
+  };
+  requiredInfo: {
+    problem: boolean;
+    customerIdentity: boolean;
+    orderId: boolean;
+  };
+  confirmedFacts: Array<{ label: string; value: string }>;
+  unconfirmedFacts: Array<{ label: string; value: string; candidates?: string[] }>;
+  confidenceBreakdown: {
+    intentPercent: number;
+    orderIdPercent: number;
+    overallPercent: number;
+  };
+  attempts: {
+    orderId: number;
+  };
+  decision: "CONTINUE" | "ESCALATE";
+}
+
 export interface TurnResponse {
   reply: string;
   language: LanguageCode;
@@ -38,6 +68,7 @@ export interface TurnResponse {
   intent: { value: string; confidence: number };
   confidence: number;
   humanRequestCount: number;
+  stateSummary?: FormattedConversationState;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -93,6 +124,20 @@ export const api = {
       `/api/calls/${callId}/end`,
       { method: "POST" },
     ),
+
+  transferCall: (callId: string, reason = "CUSTOMER_INSISTED_HUMAN") =>
+    request<{
+      ok: boolean;
+      caseRef: string;
+      reply: string;
+      language: LanguageCode;
+      escalated: boolean;
+      reason: string;
+      step: string;
+    }>(`/api/calls/${callId}/transfer`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }),
 
   agoraStatus: () =>
     request<{

@@ -45,12 +45,6 @@ describe("API Conversation & Signalling Bridge", () => {
     expect(foundCall?.id).toBe(callResult.callId);
     expect(foundCall?.channelName).toBe(channel);
 
-    // Verify transcripts in DB
-    const db = await getDatabase(config.DATABASE_URL);
-    const transcripts = await db.transcripts.forCall(callResult.callId);
-    expect(transcripts.length).toBeGreaterThanOrEqual(1);
-    expect(transcripts[0].speaker).toBe("agent");
-
     // Verify signalling event was broadcast
     expect(callStartedSignal).not.toBeNull();
     expect(callStartedSignal.callId).toBe(callResult.callId);

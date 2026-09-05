@@ -355,3 +355,35 @@ export interface ConversationEvent<P = unknown> {
   at: string;
   payload: P;
 }
+
+// ── Conversation State Summary (Architecture Diagram Block #4) ─────────────
+
+export interface FormattedConversationState {
+  intent: {
+    key: string;
+    label: string;
+    confidence: number;
+    confidencePercent: number;
+  };
+  language: {
+    primary: LanguageCode;
+    display: string;
+    codeSwitched: boolean;
+  };
+  requiredInfo: {
+    problem: boolean;
+    customerIdentity: boolean;
+    orderId: boolean;
+  };
+  confirmedFacts: Array<{ label: string; value: string }>;
+  unconfirmedFacts: Array<{ label: string; value: string; candidates?: string[] }>;
+  confidenceBreakdown: {
+    intentPercent: number;
+    orderIdPercent: number;
+    overallPercent: number;
+  };
+  attempts: {
+    orderId: number;
+  };
+  decision: "CONTINUE" | "ESCALATE";
+}

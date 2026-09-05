@@ -158,7 +158,7 @@ export const config = {
 
   gemini: {
     apiKey: str("GEMINI_API_KEY"),
-    model: str("GEMINI_MODEL", "gemini-3.8-flash"),
+    model: str("GEMINI_MODEL", "gemini-3.6-flash"),
     enabled: Boolean(str("GEMINI_API_KEY")),
   },
 

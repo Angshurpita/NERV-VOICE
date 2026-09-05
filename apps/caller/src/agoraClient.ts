@@ -16,6 +16,7 @@ export class AgoraCallManager {
   private client: IAgoraRTCClient | null = null;
   private localAudioTrack: IMicrophoneAudioTrack | null = null;
   private isJoined = false;
+  hasRemoteAudio = false;
 
   onVolume?: (level: number) => void;
   onRemoteUserJoined?: (uid: string | number) => void;
@@ -38,6 +39,7 @@ export class AgoraCallManager {
               IRemoteAudioTrack | undefined;
             if (remoteAudioTrack) {
               remoteAudioTrack.play();
+              this.hasRemoteAudio = true;
             }
             this.onRemoteUserJoined?.(user.uid);
           } catch (subErr) {
@@ -51,6 +53,7 @@ export class AgoraCallManager {
 
       this.client.on("user-unpublished", (user, mediaType) => {
         if (mediaType === "audio") {
+          this.hasRemoteAudio = false;
           this.onRemoteUserLeft?.(user.uid);
         }
       });
@@ -59,10 +62,16 @@ export class AgoraCallManager {
       this.client.on("stream-message", (uid, data) => {
         try {
           const text = new TextDecoder().decode(data);
-          const parsed = JSON.parse(text);
-          this.onStreamMessage?.(parsed);
+          try {
+            const parsed = JSON.parse(text);
+            this.onStreamMessage?.(parsed);
+          } catch {
+            if (text && text.trim()) {
+              this.onStreamMessage?.({ text: text.trim() });
+            }
+          }
         } catch {
-          // ignore non-json messages
+          // ignore non-decodable messages
         }
       });
 
@@ -158,6 +167,7 @@ export class AgoraCallManager {
       }
     } finally {
       this.isJoined = false;
+      this.hasRemoteAudio = false;
     }
   }
 

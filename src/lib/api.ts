@@ -177,6 +177,36 @@ export interface VerificationReport {
   outstanding: string[];
 }
 
+export interface FormattedConversationState {
+  intent: {
+    key: string;
+    label: string;
+    confidence: number;
+    confidencePercent: number;
+  };
+  language: {
+    primary: "en" | "hi";
+    display: string;
+    codeSwitched: boolean;
+  };
+  requiredInfo: {
+    problem: boolean;
+    customerIdentity: boolean;
+    orderId: boolean;
+  };
+  confirmedFacts: Array<{ label: string; value: string }>;
+  unconfirmedFacts: Array<{ label: string; value: string; candidates?: string[] }>;
+  confidenceBreakdown: {
+    intentPercent: number;
+    orderIdPercent: number;
+    overallPercent: number;
+  };
+  attempts: {
+    orderId: number;
+  };
+  decision: "CONTINUE" | "ESCALATE";
+}
+
 export interface Escalation {
   id: string;
   caseRef: string;
@@ -326,6 +356,30 @@ export const api = {
         state: unknown;
         transcript: TranscriptLine[];
       }>(`/api/calls/${id}/live`),
+    latestActive: () =>
+      request<{
+        call: Call | null;
+        transcript: Array<{
+          id?: string;
+          speaker: "caller" | "agent";
+          text: string;
+          createdAt?: string;
+        }>;
+      }>("/api/calls/latest/active"),
+    transfer: (id: string, reason = "CUSTOMER_INSISTED_HUMAN") =>
+      request<{
+        ok: boolean;
+        caseRef: string;
+        reply: string;
+        language: string;
+        escalated: boolean;
+        reason: string;
+        step: string;
+        stateSummary?: FormattedConversationState;
+      }>(`/api/calls/${id}/transfer`, {
+        method: "POST",
+        ...body({ reason }),
+      }),
   },
 
   tickets: {

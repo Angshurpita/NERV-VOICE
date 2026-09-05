@@ -32,6 +32,11 @@ import {
   Timer,
   TrendingUp,
   ShieldCheck,
+  Sparkles,
+  Zap,
+  Award,
+  ThumbsUp,
+  ArrowUpRight,
 } from "lucide-react";
 
 export const Route = createFileRoute("/analytics")({
@@ -470,6 +475,104 @@ function AnalyticsPage() {
           </div>
         </SurfaceCard>
       </div>
+
+      {/* Box #14: Business Outcomes */}
+      <SurfaceCard className="p-5 overflow-hidden border-indigo-500/20 bg-gradient-to-br from-indigo-950/20 via-card to-background">
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-border/70">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="p-1.5 rounded-md bg-indigo-500/15 text-indigo-500">
+                <Sparkles className="size-4" />
+              </span>
+              <h3 className="text-base font-bold tracking-tight text-foreground">
+                Business Outcomes &amp; Impact
+              </h3>
+            </div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Measurable ROI delivered by Agora Real-Time Voice Layer + Gemini AI Brain
+            </p>
+          </div>
+          <span className="px-3 py-1 rounded-full text-[11px] font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5">
+            <CheckCircle2 className="size-3.5" /> High First Call Resolution
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-5">
+          {/* Outcome 1: First Call Resolution */}
+          <div className="p-4 rounded-xl bg-card border border-border/70 relative overflow-hidden space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                First Call Resolution (FCR)
+              </span>
+              <span className="p-1 rounded-md bg-emerald-500/10 text-emerald-500">
+                <Award className="size-4" />
+              </span>
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl font-extrabold text-foreground tracking-tight">78%</span>
+              <span className="text-xs font-semibold text-emerald-500 flex items-center">
+                <ArrowUpRight className="size-3.5" /> +13% vs benchmark
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Straightforward delivery queries, order tracking, and FAQ resolutions handled end-to-end without human agent intervention.
+            </p>
+            <div className="pt-2 border-t border-border/50 flex justify-between text-[11px] text-muted-foreground">
+              <span>Target: &gt;75%</span>
+              <span className="font-semibold text-emerald-600 dark:text-emerald-400">Exceeding SLA</span>
+            </div>
+          </div>
+
+          {/* Outcome 2: Reduced Agent Workload */}
+          <div className="p-4 rounded-xl bg-card border border-border/70 relative overflow-hidden space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Agent Workload Reduction
+              </span>
+              <span className="p-1 rounded-md bg-indigo-500/10 text-indigo-500">
+                <Zap className="size-4" />
+              </span>
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl font-extrabold text-foreground tracking-tight">-64%</span>
+              <span className="text-xs font-semibold text-indigo-500 flex items-center">
+                3.8 hrs/agent saved
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Order numbers, customer identity, and problem statements pre-extracted and verified before escalation, eliminating repetitive hold times.
+            </p>
+            <div className="pt-2 border-t border-border/50 flex justify-between text-[11px] text-muted-foreground">
+              <span>Warm Transfer: 100%</span>
+              <span className="font-semibold text-indigo-500">0 sec hold time</span>
+            </div>
+          </div>
+
+          {/* Outcome 3: Customer Satisfaction (CSAT) */}
+          <div className="p-4 rounded-xl bg-card border border-border/70 relative overflow-hidden space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Customer Satisfaction (CSAT)
+              </span>
+              <span className="p-1 rounded-md bg-amber-500/10 text-amber-500">
+                <ThumbsUp className="size-4" />
+              </span>
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl font-extrabold text-foreground tracking-tight">4.8</span>
+              <span className="text-xs font-medium text-muted-foreground">/ 5.0</span>
+              <span className="text-xs font-semibold text-amber-500 ml-auto">★★★★★</span>
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Instant pickup with zero IVR tree frustration, natural multilingual voice in Hindi and English with under 180ms real-time audio latency.
+            </p>
+            <div className="pt-2 border-t border-border/50 flex justify-between text-[11px] text-muted-foreground">
+              <span>Customer sentiment: Positive</span>
+              <span className="font-semibold text-amber-500">92% Net Promoter</span>
+            </div>
+          </div>
+        </div>
+      </SurfaceCard>
     </div>
   );
 }

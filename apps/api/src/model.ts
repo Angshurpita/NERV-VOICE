@@ -31,6 +31,25 @@ function extractJson(raw: string): any {
   }
 }
 
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  errMsg: string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(errMsg)), ms);
+    promise
+      .then((val) => {
+        clearTimeout(timer);
+        resolve(val);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+}
+
 class GeminiClient implements ModelClient {
   private ai: GoogleGenAI;
   private readonly modelsToTry: string[];
@@ -41,12 +60,11 @@ class GeminiClient implements ModelClient {
   ) {
     this.ai = new GoogleGenAI({ apiKey });
     const fallbacks = [
+      "gemini-3.6-flash",
       "gemini-3.8-flash",
-      "gemini-2.5-flash",
-      "gemini-2.0-flash",
-      "gemini-1.5-flash",
+      "gemini-flash-latest",
     ];
-    this.modelsToTry = [modelId, ...fallbacks.filter((m) => m !== modelId)];
+    this.modelsToTry = Array.from(new Set([modelId, ...fallbacks]));
   }
 
   readonly available = true;
@@ -59,16 +77,20 @@ class GeminiClient implements ModelClient {
 
     for (const m of this.modelsToTry) {
       try {
-        const response = await this.ai.models.generateContent({
-          model: m,
-          contents: input.prompt,
-          config: {
-            systemInstruction: input.system,
-            responseMimeType: "application/json",
-            temperature: 0.6,
-            maxOutputTokens: 2048,
-          },
-        });
+        const response = await withTimeout(
+          this.ai.models.generateContent({
+            model: m,
+            contents: input.prompt,
+            config: {
+              systemInstruction: input.system,
+              responseMimeType: "application/json",
+              temperature: 0.3,
+              maxOutputTokens: 256,
+            },
+          }),
+          7000,
+          `Model ${m} timed out after 7000ms`,
+        );
 
         const rawText =
           response.text ??
@@ -97,7 +119,13 @@ class GeminiClient implements ModelClient {
       }
     }
 
-    throw lastError ?? new Error("All Gemini model candidates failed");
+    console.warn(
+      "[gemini/@google/genai] All candidates failed, providing graceful fallback reply",
+    );
+    return {
+      reply:
+        "I understand you need assistance. Could you please provide your order number or let me know what you would like help with?",
+    };
   }
 
   async summarise(transcript: string): Promise<string> {

@@ -1,7 +1,13 @@
 import { Router } from "express";
 import { z } from "zod";
 import { getDatabase } from "@echosphere/db";
-import { endCall, handleTurn, startCall } from "../conversation.js";
+import {
+  endCall,
+  getLatestActiveCall,
+  handleTurn,
+  startCall,
+  transferCall,
+} from "../conversation.js";
 import { attachUser, requireRole, type AuthedRequest } from "../auth.js";
 import { config } from "../config.js";
 
@@ -79,7 +85,28 @@ router.post("/:id/turn", async (req, res) => {
     intent: result.state.intent,
     confidence: result.state.confidence.overall,
     humanRequestCount: result.state.humanRequestCount,
+    stateSummary: result.stateSummary,
   });
+});
+
+router.get("/latest/active", async (req, res) => {
+  const active = await getLatestActiveCall();
+  res.json(active);
+});
+
+router.post("/:id/transfer", async (req, res) => {
+  const reason =
+    typeof req.body?.reason === "string"
+      ? req.body.reason
+      : "CUSTOMER_INSISTED_HUMAN";
+  const outcome = await transferCall(req.params.id!, reason);
+  if ("error" in outcome) {
+    res
+      .status(outcome.error === "Call not found" ? 404 : 400)
+      .json({ error: outcome.error });
+    return;
+  }
+  res.json(outcome);
 });
 
 router.post("/:id/end", async (req, res) => {

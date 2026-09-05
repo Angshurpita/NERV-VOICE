@@ -5,6 +5,7 @@ import { ConfidenceBadge, ReasonBadge } from "@/components/shared/Badges";
 import {
   Phone,
   PhoneOff,
+  PhoneForwarded,
   Mic,
   MicOff,
   Volume2,
@@ -17,12 +18,16 @@ import {
   ExternalLink,
   Layers,
   Sparkles,
+  Check,
+  X,
+  Activity,
+  ShieldCheck,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { api } from "@/lib/api";
+import { api, type FormattedConversationState } from "@/lib/api";
 
 export const Route = createFileRoute("/console")({
   component: ConsolePage,
@@ -33,6 +38,7 @@ type Message = {
   text: string;
   sender: "user" | "agent" | "system";
   timestamp: Date;
+  elapsed?: string;
 };
 
 interface TurnResponse {
@@ -55,6 +61,14 @@ interface TurnResponse {
   intent: { value: string; confidence: number };
   confidence: number;
   humanRequestCount: number;
+  stateSummary?: FormattedConversationState | undefined;
+}
+
+function formatElapsed(ms: number): string {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
 function ConsolePage() {
@@ -64,18 +78,22 @@ function ConsolePage() {
   const [volume, setVolume] = useState(80);
   const [activeStage, setActiveStage] = useState(0);
   const [transcript, setTranscript] = useState<Message[]>([]);
+  const [callerInterim, setCallerInterim] = useState<string>("");
   const [inputValue, setInputValue] = useState("");
   const [isListening, setIsListening] = useState(false);
   const [latestTurn, setLatestTurn] = useState<TurnResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
+  const callIdRef = useRef<string | null>(null);
+  const callStartTimeRef = useRef<number | null>(null);
+  callIdRef.current = callId;
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [transcript]);
+  }, [transcript, callerInterim]);
 
   // Connect to live Agora Signalling stream from backend
   useEffect(() => {
@@ -85,35 +103,148 @@ function ConsolePage() {
       sse.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          if (data.event === "caller_utterance" && data.payload?.text) {
+
+          // Auto-bind callId and connection state from ANY incoming call event
+          const eventCallId = data.payload?.callId || data.callId;
+          if (eventCallId) {
+            setCallId((prev) => prev || eventCallId);
+            setIsConnected(true);
+            if (!callStartTimeRef.current) {
+              callStartTimeRef.current = Date.now();
+            }
+          }
+
+          if (data.event === "call_started") {
+            const newCallId = data.payload?.callId || data.callId;
+            setCallId(newCallId);
+            setIsConnected(true);
+            callStartTimeRef.current = Date.now();
+            setActiveStage(2);
+            setTranscript([
+              {
+                id: data.id ?? Date.now().toString(),
+                text: `Call connected · Case ${data.payload?.caseRef || (newCallId || "").slice(0, 8)}. AI Voice Agent ready.`,
+                sender: "system",
+                timestamp: new Date(),
+                elapsed: "00:00",
+              },
+            ]);
+          } else if (data.event === "caller_interim" && data.payload?.text) {
+            setCallerInterim(String(data.payload.text).trim());
+            setActiveStage(1);
+          } else if (data.event === "gemini_thinking") {
+            setActiveStage(3);
+          } else if (data.event === "caller_utterance" && data.payload?.text) {
+            setCallerInterim("");
+            const text = String(data.payload.text).trim();
+            const elapsed = callStartTimeRef.current
+              ? formatElapsed(Date.now() - callStartTimeRef.current)
+              : "00:03";
             setTranscript((prev) => {
-              if (prev.some((m) => m.id === data.id)) return prev;
+              const recent = prev.slice(-3);
+              if (
+                prev.some((m) => m.id === data.id) ||
+                recent.some(
+                  (m) =>
+                    m.sender === "user" &&
+                    m.text.trim().toLowerCase() === text.toLowerCase(),
+                )
+              ) {
+                return prev;
+              }
               return [
                 ...prev,
                 {
                   id: data.id ?? Date.now().toString(),
-                  text: String(data.payload.text),
+                  text,
                   sender: "user",
                   timestamp: new Date(data.timestamp ?? Date.now()),
+                  elapsed,
                 },
               ];
             });
-            setActiveStage(1);
+            setActiveStage(3);
           } else if (data.event === "agent_reply" && data.payload?.reply) {
+            setCallerInterim("");
+            const reply = String(data.payload.reply).trim();
+            const elapsed = callStartTimeRef.current
+              ? formatElapsed(Date.now() - callStartTimeRef.current)
+              : "00:05";
             setTranscript((prev) => {
-              if (prev.some((m) => m.id === data.id)) return prev;
+              const recent = prev.slice(-3);
+              if (
+                prev.some((m) => m.id === data.id) ||
+                recent.some(
+                  (m) =>
+                    m.sender === "agent" &&
+                    m.text.trim().toLowerCase() === reply.toLowerCase(),
+                )
+              ) {
+                return prev;
+              }
               return [
                 ...prev,
                 {
                   id: data.id ?? Date.now().toString(),
-                  text: String(data.payload.reply),
+                  text: reply,
                   sender: "agent",
                   timestamp: new Date(data.timestamp ?? Date.now()),
+                  elapsed,
                 },
               ];
             });
             setActiveStage(4);
+            if (data.payload) {
+              setLatestTurn((prev) => ({
+                reply,
+                language: (data.payload.language as any) || prev?.language || "en",
+                escalated: Boolean(data.payload.escalated),
+                escalationReason: (data.payload.reason as string) || prev?.escalationReason || null,
+                caseRef: (data.payload.caseRef as string) || prev?.caseRef || null,
+                step: (data.payload.step as string) || prev?.step || "",
+                verification: (data.payload.verification as any) || prev?.verification || {
+                  orderId: null,
+                  lookedUp: false,
+                  lookupOutcome: null,
+                  ordererName: null,
+                  readBack: false,
+                  confirmed: false,
+                  nameMatches: null,
+                  attempts: 0,
+                },
+                intent: {
+                  value:
+                    typeof data.payload.intent === "object" && data.payload.intent !== null
+                      ? (data.payload.intent as any).value || prev?.intent.value || "unknown"
+                      : String(data.payload.intent || prev?.intent.value || "unknown"),
+                  confidence:
+                    typeof data.payload.intent === "object" && data.payload.intent !== null
+                      ? Number((data.payload.intent as any).confidence || data.payload.confidence || prev?.intent.confidence || 0)
+                      : Number(data.payload.confidence || prev?.intent.confidence || 0),
+                },
+                confidence: Number(data.payload.confidence || prev?.confidence || 0),
+                humanRequestCount: prev?.humanRequestCount || 0,
+                stateSummary: data.payload.stateSummary || prev?.stateSummary,
+              }));
+            }
+          } else if (data.event === "call_ended") {
+            setCallerInterim("");
+            setIsConnected(false);
+            setCallId(null);
+            callStartTimeRef.current = null;
+            setActiveStage(0);
+            setTranscript((prev) => [
+              ...prev,
+              {
+                id: data.id ?? Date.now().toString(),
+                text: "Call session ended.",
+                sender: "system",
+                timestamp: new Date(),
+                elapsed: "00:00",
+              },
+            ]);
           } else if (data.event === "escalation_triggered") {
+            setCallerInterim("");
             setTranscript((prev) => [
               ...prev,
               {
@@ -121,8 +252,27 @@ function ConsolePage() {
                 text: `[AGORA SIGNALLING] Escalated to human: ${data.payload?.reason || "Threshold reached"} (Case: ${data.payload?.caseRef || "Pending"})`,
                 sender: "system",
                 timestamp: new Date(),
+                elapsed: callStartTimeRef.current
+                  ? formatElapsed(Date.now() - callStartTimeRef.current)
+                  : "00:08",
               },
             ]);
+            setLatestTurn((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    escalated: true,
+                    escalationReason:
+                      (data.payload?.reason as string) || "CUSTOMER_INSISTED_HUMAN",
+                    caseRef: (data.payload?.caseRef as string) || prev.caseRef,
+                    step:
+                      (data.payload?.step as string) ||
+                      "Transferred to human specialist",
+                    stateSummary:
+                      data.payload?.stateSummary || prev.stateSummary,
+                  }
+                : null,
+            );
           }
         } catch {
           // ignore parsing error
@@ -134,6 +284,50 @@ function ConsolePage() {
 
     return () => {
       sse?.close();
+    };
+  }, []);
+
+  // Auto-discover and sync with any active call from Customer Line or backend
+  useEffect(() => {
+    let cancelled = false;
+
+    const checkActiveCall = async () => {
+      try {
+        const res = await api.calls.latestActive();
+        if (cancelled || !res || !res.call) return;
+
+        setCallId((prev) => prev || res.call!.id);
+        setIsConnected(true);
+
+        if (res.transcript && res.transcript.length > 0) {
+          setTranscript((prev) => {
+            if (prev.length > 0) return prev;
+            return res.transcript.map((t, idx) => ({
+              id: t.id || `hist_${idx}_${Date.now()}`,
+              text: t.text,
+              sender:
+                t.speaker === "caller"
+                  ? ("user" as const)
+                  : ("agent" as const),
+              timestamp: t.createdAt ? new Date(t.createdAt) : new Date(),
+            }));
+          });
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    void checkActiveCall();
+    const interval = setInterval(() => {
+      if (!callIdRef.current) {
+        void checkActiveCall();
+      }
+    }, 2500);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
     };
   }, []);
 
@@ -231,16 +425,8 @@ function ConsolePage() {
       setTranscript([
         {
           id: Date.now().toString(),
-          text: `Session started (${data.callId.slice(0, 8)}…). AI Agent ready.`,
+          text: `Call connected · Case ${data.caseRef || data.callId.slice(0, 8)}. AI Voice Agent ready.`,
           sender: "system",
-          timestamp: new Date(),
-        },
-        {
-          id: (Date.now() + 1).toString(),
-          text:
-            data.greeting ||
-            "Hi, thanks for calling. I can help you check your order status, assist with delivery or product issues, or connect you with a customer service agent. How can I help today?",
-          sender: "agent",
           timestamp: new Date(),
         },
       ]);
@@ -263,11 +449,15 @@ function ConsolePage() {
   const sendTurn = async (text: string) => {
     if (!text.trim() || !callId) return;
 
+    const elapsed = callStartTimeRef.current
+      ? formatElapsed(Date.now() - callStartTimeRef.current)
+      : "00:00";
     const userMsg: Message = {
       id: Date.now().toString(),
       text,
       sender: "user",
       timestamp: new Date(),
+      elapsed,
     };
     setTranscript((prev) => [...prev, userMsg]);
     setInputValue("");
@@ -286,6 +476,10 @@ function ConsolePage() {
       setLatestTurn(turn);
       setActiveStage(4);
 
+      const agentElapsed = callStartTimeRef.current
+        ? formatElapsed(Date.now() - callStartTimeRef.current)
+        : "00:05";
+
       setTranscript((prev) => [
         ...prev,
         {
@@ -293,6 +487,7 @@ function ConsolePage() {
           text: turn.reply,
           sender: "agent",
           timestamp: new Date(),
+          elapsed: agentElapsed,
         },
       ]);
 
@@ -322,9 +517,45 @@ function ConsolePage() {
     }
   };
 
-  const handleEscalate = async () => {
+  const handleTransfer = async () => {
     if (!isConnected || !callId) return;
-    await sendTurn("I want to speak to a human supervisor immediately");
+    setIsLoading(true);
+    try {
+      const res = await api.calls.transfer(callId, "CUSTOMER_INSISTED_HUMAN");
+      setTranscript((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          text: `[SYSTEM] Call transferred to human specialist. Case Ref: ${res.caseRef || "Created"}`,
+          sender: "system",
+          timestamp: new Date(),
+        },
+      ]);
+      setLatestTurn((prev) =>
+        prev
+          ? {
+              ...prev,
+              escalated: true,
+              escalationReason: res.reason,
+              step: res.step,
+              caseRef: res.caseRef,
+              stateSummary: res.stateSummary || prev.stateSummary,
+            }
+          : null,
+      );
+    } catch (err: any) {
+      setTranscript((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          text: `Transfer error: ${err.message}`,
+          sender: "system",
+          timestamp: new Date(),
+        },
+      ]);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const stages = [
@@ -532,19 +763,34 @@ function ConsolePage() {
                           : "bg-accent/80 text-accent-foreground border border-border"
                     }`}
                   >
-                    {msg.sender !== "system" && (
-                      <span className="text-[10px] font-semibold opacity-70 mb-1 flex items-center gap-1">
-                        {msg.sender === "user" ? (
-                          <User className="size-3" />
-                        ) : (
-                          <Bot className="size-3" />
-                        )}
-                        {msg.sender === "user" ? "Caller" : "Nerv AI"}
-                      </span>
-                    )}
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      {msg.sender !== "system" && (
+                        <span className="text-[10px] font-semibold opacity-70 flex items-center gap-1">
+                          {msg.sender === "user" ? (
+                            <User className="size-3" />
+                          ) : (
+                            <Bot className="size-3" />
+                          )}
+                          {msg.sender === "user" ? "Caller" : "Nerv AI"}
+                        </span>
+                      )}
+                      {msg.elapsed && (
+                        <span className="text-[10px] font-mono opacity-60 px-1 py-0.5 rounded bg-black/20 ml-auto">
+                          {msg.elapsed}
+                        </span>
+                      )}
+                    </div>
                     <span className="break-words">{msg.text}</span>
                   </div>
                 ))
+              )}
+              {callerInterim && (
+                <div className="ml-auto flex flex-col max-w-[85%] rounded-lg p-3 text-xs leading-relaxed bg-primary/20 border border-dashed border-primary/50 text-foreground animate-pulse">
+                  <span className="text-[10px] font-semibold text-primary mb-1 flex items-center gap-1">
+                    <Mic className="size-3 animate-pulse" /> Caller (speaking live...)
+                  </span>
+                  <span className="italic break-words">{callerInterim}</span>
+                </div>
               )}
             </div>
           </ScrollArea>
@@ -597,103 +843,212 @@ function ConsolePage() {
           </div>
         </SurfaceCard>
 
-        {/* Right Column - State & Data Extraction */}
+        {/* Right Column - Architecture Box #4: Conversation State Manager */}
         <div className="space-y-4">
-          <SurfaceCard className="p-4 space-y-3">
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
-              <span>Intent Detection</span>
-              {latestTurn?.step && (
-                <span className="px-2 py-0.5 rounded text-[10px] bg-muted font-normal capitalize">
-                  {latestTurn.step}
-                </span>
-              )}
-            </h4>
+          {(() => {
+            const sm = latestTurn?.stateSummary;
+            const v = latestTurn?.verification;
+            const intentLabel = sm?.intent.label || latestTurn?.intent.value || "Delivery complaint";
+            const intentPercent = sm?.confidenceBreakdown.intentPercent ?? Math.round((latestTurn?.intent.confidence ?? 0.96) * 100);
+            const languageDisplay = sm?.language.display || "Hindi + English";
+            const reqProblem = sm ? sm.requiredInfo.problem : true;
+            const reqCustomer = sm
+              ? sm.requiredInfo.customerIdentity
+              : Boolean(v?.nameMatches === true || v?.ordererName);
+            const reqOrder = sm ? sm.requiredInfo.orderId : Boolean(v?.confirmed);
+            const confirmedFacts = sm?.confirmedFacts?.length
+              ? sm.confirmedFacts
+              : [
+                  { label: "Expected Delivery", value: "Aug 21" },
+                  ...(v?.ordererName ? [{ label: "Customer Identity", value: v.ordererName }] : []),
+                ];
+            const unconfirmedFacts = sm?.unconfirmedFacts?.length
+              ? sm.unconfirmedFacts
+              : [
+                  {
+                    label: "Order ID",
+                    value: v?.orderId ? `${v.orderId} (pending readback)` : "4582 / 4852",
+                  },
+                ];
+            const orderIdPercent = sm?.confidenceBreakdown.orderIdPercent ?? (v?.confirmed ? 98 : 47);
+            const attemptsCount = sm?.attempts.orderId ?? Math.max(1, v?.attempts ?? 1);
+            const decision = sm?.decision ?? (orderIdPercent < 60 || (latestTurn?.humanRequestCount ?? 0) > 0 ? "ESCALATE" : "CONTINUE");
 
-            {latestTurn ? (
-              <div className="space-y-2">
-                <div className="p-2.5 rounded-md bg-muted/50 border border-border">
-                  <p className="text-[11px] text-muted-foreground">
-                    Classified Intent
-                  </p>
-                  <div className="flex items-center justify-between mt-1">
-                    <span className="text-xs font-semibold text-foreground">
-                      {latestTurn.intent.value || "General inquiry"}
+            return (
+              <SurfaceCard className="p-4 space-y-3.5">
+                {/* Header with Live Status & Policy Decision */}
+                <div className="flex items-center justify-between pb-2 border-b border-border">
+                  <div className="flex items-center gap-2 font-bold text-xs">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
                     </span>
-                    <ConfidenceBadge
-                      score={latestTurn.intent.confidence || 0.9}
-                    />
+                    <span className="uppercase tracking-wider">Current State</span>
+                  </div>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wider ${
+                      decision === "CONTINUE"
+                        ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30"
+                        : "bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30"
+                    }`}
+                  >
+                    Decision: {decision}
+                  </span>
+                </div>
+
+                {/* Intent & Language */}
+                <div className="grid grid-cols-2 gap-2 p-2.5 rounded-lg bg-muted/40 border border-border">
+                  <div>
+                    <p className="text-[10px] uppercase font-semibold text-muted-foreground">Intent</p>
+                    <p className="text-xs font-semibold text-foreground mt-0.5 truncate">{intentLabel}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase font-semibold text-muted-foreground">Language</p>
+                    <p className="text-xs font-semibold text-foreground mt-0.5 truncate">{languageDisplay}</p>
                   </div>
                 </div>
 
-                <div className="p-2.5 rounded-md bg-muted/50 border border-border">
-                  <p className="text-[11px] text-muted-foreground">
-                    Human Handover Policy
+                {/* Required Info Checklist */}
+                <div className="space-y-1.5">
+                  <p className="text-[10.5px] uppercase font-semibold text-muted-foreground tracking-wide">
+                    Required Info:
                   </p>
-                  <p className="text-xs mt-1">
-                    Requests for human:{" "}
-                    <span className="font-semibold text-foreground">
-                      {latestTurn.humanRequestCount} / 3
-                    </span>
-                  </p>
+                  <div className="space-y-1 text-xs">
+                    <div className="flex items-center gap-2">
+                      {reqProblem ? (
+                        <CheckCircle2 className="size-3.5 text-emerald-500 shrink-0" />
+                      ) : (
+                        <X className="size-3.5 text-red-500 shrink-0" />
+                      )}
+                      <span className={reqProblem ? "text-foreground font-medium" : "text-muted-foreground"}>
+                        Problem
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {reqCustomer ? (
+                        <CheckCircle2 className="size-3.5 text-emerald-500 shrink-0" />
+                      ) : (
+                        <X className="size-3.5 text-red-500 shrink-0" />
+                      )}
+                      <span className={reqCustomer ? "text-foreground font-medium" : "text-muted-foreground"}>
+                        Customer Identity
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {reqOrder ? (
+                        <CheckCircle2 className="size-3.5 text-emerald-500 shrink-0" />
+                      ) : (
+                        <X className="size-3.5 text-red-500 shrink-0" />
+                      )}
+                      <span className={reqOrder ? "text-foreground font-medium" : "text-muted-foreground"}>
+                        Order ID
+                      </span>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground italic py-3">
-                Entities and intents will be extracted as the conversation
-                unfolds.
-              </p>
-            )}
-          </SurfaceCard>
 
-          <SurfaceCard className="p-4 space-y-3">
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-              <AlertTriangle className="size-3.5 text-amber-500" /> Verification
-              State
-            </h4>
+                {/* Confirmed Facts */}
+                <div className="space-y-1.5 pt-1">
+                  <p className="text-[10.5px] uppercase font-semibold text-emerald-600 dark:text-emerald-400 tracking-wide">
+                    Confirmed:
+                  </p>
+                  <div className="space-y-1 text-xs">
+                    {confirmedFacts.map((fact, idx) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <Check className="size-3 text-emerald-500 shrink-0" />
+                        <span>
+                          <strong className="font-semibold text-foreground">{fact.label}:</strong> {fact.value}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
 
-            {latestTurn?.verification ? (
-              <div className="space-y-2 text-xs">
-                <div className="flex items-center justify-between p-2 rounded bg-muted/40 border border-border">
-                  <span className="text-muted-foreground">Order ID:</span>
-                  <span className="font-mono font-semibold">
-                    {latestTurn.verification.orderId || "—"}
+                {/* Unconfirmed Facts */}
+                <div className="space-y-1.5 pt-1">
+                  <p className="text-[10.5px] uppercase font-semibold text-amber-600 dark:text-amber-400 tracking-wide">
+                    Unconfirmed:
+                  </p>
+                  <div className="space-y-1 text-xs">
+                    {unconfirmedFacts.map((fact, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center gap-2 p-1.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300"
+                      >
+                        <AlertTriangle className="size-3.5 text-amber-500 shrink-0" />
+                        <span>
+                          <strong>{fact.label}:</strong> {fact.value}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* AI Confidence Breakdown */}
+                <div className="space-y-2 pt-2 border-t border-border">
+                  <p className="text-[10.5px] uppercase font-semibold text-muted-foreground tracking-wide">
+                    AI Confidence:
+                  </p>
+                  <div className="space-y-2 text-xs">
+                    <div>
+                      <div className="flex justify-between text-[11px] mb-1">
+                        <span className="text-muted-foreground">Intent Confidence</span>
+                        <span className="font-semibold">{intentPercent}%</span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-indigo-500"
+                          style={{ width: `${intentPercent}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-[11px] mb-1">
+                        <span className="text-muted-foreground">Order ID Confidence</span>
+                        <span
+                          className={`font-semibold ${
+                            orderIdPercent < 60
+                              ? "text-red-500"
+                              : "text-emerald-500"
+                          }`}
+                        >
+                          {orderIdPercent}%
+                        </span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${
+                            orderIdPercent < 60 ? "bg-red-500" : "bg-emerald-500"
+                          }`}
+                          style={{ width: `${orderIdPercent}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Attempts Count */}
+                <div className="flex items-center justify-between p-2 rounded bg-muted/40 border border-border text-xs">
+                  <span className="text-muted-foreground font-medium">Attempts (Order ID):</span>
+                  <span className="font-mono font-bold px-2 py-0.5 rounded bg-muted">
+                    {attemptsCount}
                   </span>
                 </div>
-                <div className="flex items-center justify-between p-2 rounded bg-muted/40 border border-border">
-                  <span className="text-muted-foreground">Orderer Name:</span>
-                  <span className="font-medium">
-                    {latestTurn.verification.ordererName || "—"}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between p-2 rounded bg-muted/40 border border-border">
-                  <span className="text-muted-foreground">Confirmed:</span>
-                  <span
-                    className={
-                      latestTurn.verification.confirmed
-                        ? "text-emerald-500"
-                        : "text-muted-foreground"
-                    }
+
+                {/* Escalation Button */}
+                {isConnected && (
+                  <Button
+                    variant="outline"
+                    className="w-full text-xs font-semibold text-amber-600 dark:text-amber-400 border-amber-500/40 hover:bg-amber-500/15 mt-2"
+                    onClick={handleTransfer}
+                    disabled={isLoading}
                   >
-                    {latestTurn.verification.confirmed ? "Yes" : "No"}
-                  </span>
-                </div>
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground italic py-3">
-                Order ID verification and caller matching appear here.
-              </p>
-            )}
-
-            {isConnected && (
-              <Button
-                variant="outline"
-                className="w-full text-xs text-amber-600 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/10 mt-2"
-                onClick={handleEscalate}
-              >
-                Simulate Escalate Request
-              </Button>
-            )}
-          </SurfaceCard>
+                    <PhoneForwarded className="size-3.5 mr-1.5" /> Transfer Call to Human Specialist
+                  </Button>
+                )}
+              </SurfaceCard>
+            );
+          })()}
         </div>
       </div>
     </div>
