@@ -21,6 +21,7 @@ export type VoiceDiagnosticEvent =
   | "AGENT_AUDIO_PUBLISHED"
   | "AGENT_STOPPED"
   | "CALL_ENDED"
+  | "CALL_TRANSFERRED"
   | "PIPELINE_ERROR";
 
 export interface DiagnosticContext {

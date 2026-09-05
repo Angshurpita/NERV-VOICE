@@ -124,6 +124,9 @@ class GeminiClient implements ModelClient {
       "[gemini/@google/genai] All candidates failed, providing graceful fallback reply",
     );
     return {
+      intent: "unknown",
+      intentConfidence: 0,
+      language: "en",
       reply:
         "I understand you need assistance. Could you please provide your order number or let me know what you would like help with?",
     };

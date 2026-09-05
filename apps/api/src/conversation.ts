@@ -269,7 +269,7 @@ async function createCase(call: CallRow, result: TurnResult): Promise<string> {
   const ticket = await db.tickets.create({
     callId: call.id,
     customerId: state.customer.id,
-    customerName,
+    customerName: customerName ?? "Unknown",
     orderId: report.orderId,
     subject: subjectFor(reason, report.orderId),
     description: [
@@ -295,7 +295,7 @@ async function createCase(call: CallRow, result: TurnResult): Promise<string> {
   await db.escalations.create({
     callId: call.id,
     ticketId: ticket.id,
-    customerName,
+    customerName: customerName ?? "Unknown",
     orderId: report.orderId,
     reason,
     detail: state.escalation.detail ?? escalationLabel(reason),
@@ -473,11 +473,11 @@ export async function transferCall(
   const updatedState: ConversationState = {
     ...state,
     escalation: {
-      escalated: true,
+      required: true,
       reason: (reason as any) || "CUSTOMER_INSISTED_HUMAN",
       detail: "Direct handover requested by caller or operator",
       report: state.escalation.report ?? buildReport(state, null),
-      at: new Date().toISOString(),
+      triggeredAt: new Date().toISOString(),
     },
   };
 
@@ -552,7 +552,6 @@ export async function transferCall(
     escalated: true,
     reason,
     step: "Transferred to human specialist",
-    stateSummary,
   };
 }
 
