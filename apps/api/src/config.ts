@@ -34,6 +34,17 @@ function bool(key: string, fallback: boolean): boolean {
   return raw === "true" || raw === "1";
 }
 
+/**
+ * Single source of truth for the Gemini model, so `.env.example`, the coded
+ * default and `model.ts`'s failover order cannot drift apart again.
+ */
+export const GEMINI_DEFAULT_MODEL = "gemini-3.8-flash";
+export const GEMINI_FALLBACK_MODELS = [
+  GEMINI_DEFAULT_MODEL,
+  "gemini-3.6-flash",
+  "gemini-flash-latest",
+] as const;
+
 const NODE_ENV = str("NODE_ENV", "development");
 const IS_PRODUCTION = NODE_ENV === "production";
 
@@ -158,15 +169,21 @@ export const config = {
 
   gemini: {
     apiKey: str("GEMINI_API_KEY"),
-    model: str("GEMINI_MODEL", "gemini-3.6-flash"),
+    model: str("GEMINI_MODEL", GEMINI_DEFAULT_MODEL),
     enabled: Boolean(str("GEMINI_API_KEY")),
   },
 
-  deepgram: {
-    apiKey: str("DEEPGRAM_API_KEY"),
-    ttsModel: str("DEEPGRAM_TTS_MODEL", "aura-2-thalia-en"),
-    sttModel: str("DEEPGRAM_STT_MODEL", "nova-3"),
-    sttHindiModel: str("DEEPGRAM_STT_HINDI_MODEL", "nova-2"),
+  /**
+   * Speech stack actually built in `agent-worker.ts`: Agora-managed Ares ASR in,
+   * OpenAI TTS ("sage") out. Both are configured on the Agora Cloud Agent, so
+   * this deployment holds no vendor keys for either.
+   */
+  voice: {
+    sttProvider: "agora_ares" as const,
+    sttModel: str("AGORA_STT_MODEL", "ares"),
+    ttsProvider: "openai" as const,
+    ttsModel: str("OPENAI_TTS_MODEL", "openai-tts"),
+    ttsVoice: str("OPENAI_TTS_VOICE", "sage"),
   },
 
   agora: {
@@ -189,6 +206,16 @@ export const config = {
       str("AGORA_CUSTOMER_SECRET"),
     ),
     llmUrl: resolvedLlmUrl,
+    /** Whether Agora's cloud can actually call back into this deployment. */
+    llmUrlReachable: Boolean(
+      resolvedLlmUrl && !isPrivateOrLocalhostUrl(resolvedLlmUrl),
+    ),
+    /**
+     * Opt-in escape hatch for demoing the voice transport without this backend.
+     * Off by default: with the managed OpenAI preset, none of the deterministic
+     * engine in `@echosphere/core` runs for the call.
+     */
+    allowManagedLlmFallback: bool("AGORA_ALLOW_MANAGED_LLM_FALLBACK", false),
   },
 
   /** Seed a first admin so a fresh install is usable. Disable in production. */
@@ -200,18 +227,33 @@ export const config = {
   },
 } as const;
 
-// Production requirement: fail loudly if Agora Cloud Agent is enabled without a public CustomLLM endpoint
-if (config.IS_PRODUCTION && config.agora.cloudAgentEnabled) {
+/**
+ * Why this is checked outside production too: a Cloud Agent started without a
+ * reachable CustomLLM URL still places a perfectly convincing call — Agora just
+ * answers it with its own managed model, so the deterministic engine, the
+ * transcript rows and the escalation ladder are all bypassed without a single
+ * error anywhere. The production check throws; elsewhere it shouts, and
+ * `agent-worker` refuses to start the session.
+ */
+export function describeLlmMisconfiguration(): string | null {
+  if (!config.agora.cloudAgentEnabled) return null;
   if (!config.agora.llmUrl) {
-    throw new Error(
-      "CRITICAL CONFIGURATION ERROR: PUBLIC_URL or AGORA_LLM_URL must be configured in production for Agora Conversational AI Agent CustomLLM callbacks. Agora servers cannot reach an unconfigured endpoint.",
-    );
+    return "PUBLIC_URL or AGORA_LLM_URL is not configured. Agora's Conversational AI Agent has no CustomLLM endpoint to call back into, so calls would run on Agora's managed model and never reach EchoSphere.";
   }
   if (isPrivateOrLocalhostUrl(config.agora.llmUrl)) {
-    throw new Error(
-      `CRITICAL CONFIGURATION ERROR: Agora CustomLLM URL "${config.agora.llmUrl}" points to localhost or a private IP. Agora cloud service cannot reach private/local addresses in production. Configure a public HTTPS URL (e.g. via Cloudflare tunnel, ngrok, or production domain).`,
-    );
+    return `Agora CustomLLM URL "${config.agora.llmUrl}" points to localhost or a private IP. Agora's cloud cannot reach private or local addresses — expose this backend over a public HTTPS URL (e.g. cloudflared tunnel, ngrok, or the deployed domain).`;
   }
+  return null;
+}
+
+const llmMisconfiguration = describeLlmMisconfiguration();
+if (llmMisconfiguration) {
+  if (config.IS_PRODUCTION) {
+    throw new Error(`CRITICAL CONFIGURATION ERROR: ${llmMisconfiguration}`);
+  }
+  console.error(
+    `[config] CRITICAL CONFIGURATION ERROR: ${llmMisconfiguration}`,
+  );
 }
 
 export const policy: PolicyConfig = withPolicy({
@@ -247,11 +289,19 @@ export function describeConfig(): string[] {
   lines.push(
     `agora cloud agt  ${config.agora.cloudAgentEnabled ? "enabled" : "disabled"}`,
   );
-  lines.push(`speech to text   Deepgram (${config.deepgram.sttModel})`);
-  lines.push(`text to speech   Deepgram Aura (${config.deepgram.ttsModel})`);
+  lines.push(`speech to text   Agora Ares (${config.voice.sttModel})`);
+  lines.push(
+    `text to speech   OpenAI TTS (${config.voice.ttsModel}, voice ${config.voice.ttsVoice})`,
+  );
   lines.push(
     `llm bridge url   ${config.agora.llmUrl || "NOT CONFIGURED (set PUBLIC_URL or AGORA_LLM_URL)"}`,
   );
+  lines.push(
+    `llm bridge mode  ${config.agora.llmUrlReachable ? "CustomLLM (EchoSphere engine)" : "UNREACHABLE — Cloud Agent sessions will be refused"}`,
+  );
+  if (llmMisconfiguration) {
+    lines.push(`WARNING: ${llmMisconfiguration}`);
+  }
   lines.push(
     `escalate after   ${policy.humanRequestsBeforeHandover} requests for a human`,
   );
@@ -274,12 +324,15 @@ export function getSystemStatus() {
       appId: config.agora.appId ? `${config.agora.appId.slice(0, 6)}...` : null,
       llmBridgeConfigured: Boolean(config.agora.llmUrl),
       llmBridgeUrl: config.agora.llmUrl || null,
+      llmBridgeReachable: config.agora.llmUrlReachable,
+      llmBridgeIssue: describeLlmMisconfiguration(),
       sttConfigured: true,
-      sttProvider: "deepgram",
-      sttModel: config.deepgram.sttModel,
+      sttProvider: config.voice.sttProvider,
+      sttModel: config.voice.sttModel,
       ttsConfigured: true,
-      ttsProvider: "deepgram_aura",
-      ttsModel: config.deepgram.ttsModel,
+      ttsProvider: config.voice.ttsProvider,
+      ttsModel: config.voice.ttsModel,
+      ttsVoice: config.voice.ttsVoice,
     },
     brain: {
       model: config.gemini.model,

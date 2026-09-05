@@ -270,6 +270,7 @@ class AgoraService {
       ttsConfigured: sys.agora.ttsConfigured,
       ttsProvider: sys.agora.ttsProvider,
       ttsModel: sys.agora.ttsModel,
+      ttsVoice: sys.agora.ttsVoice,
       activeSessions: activeCount,
       agentActive: activeCount > 0,
       system: sys,

@@ -45,7 +45,11 @@ export interface FormattedConversationState {
     orderId: boolean;
   };
   confirmedFacts: Array<{ label: string; value: string }>;
-  unconfirmedFacts: Array<{ label: string; value: string; candidates?: string[] }>;
+  unconfirmedFacts: Array<{
+    label: string;
+    value: string;
+    candidates?: string[];
+  }>;
   confidenceBreakdown: {
     intentPercent: number;
     orderIdPercent: number;
@@ -101,7 +105,11 @@ export const api = {
       stats: { orders: number; customers: number };
     }>("/api/catalogue/scenarios"),
 
-  startCall: (language: LanguageCode, channelName?: string) =>
+  startCall: (
+    language: LanguageCode,
+    channelName?: string,
+    caller?: { callerName?: string; callerPhone?: string },
+  ) =>
     request<{
       callId: string;
       caseRef: string;
@@ -110,7 +118,12 @@ export const api = {
       channelName: string;
     }>("/api/calls", {
       method: "POST",
-      body: JSON.stringify({ language, channelName }),
+      body: JSON.stringify({
+        language,
+        channelName,
+        callerName: caller?.callerName,
+        callerPhone: caller?.callerPhone,
+      }),
     }),
 
   turn: (callId: string, text: string, asrConfidence: number = 1) =>
