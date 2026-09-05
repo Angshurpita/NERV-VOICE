@@ -61,6 +61,8 @@ export default function App() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [callId, setCallId] = useState<string | null>(null);
   const [language, setLanguage] = useState<LanguageCode>("en");
+  const [callerName, setCallerName] = useState("");
+  const [callerPhone, setCallerPhone] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [typed, setTyped] = useState("");
   const [micOn, setMicOn] = useState(false);
@@ -105,7 +107,8 @@ export default function App() {
     orderId: "4852",
     customerName: "Rahul Sharma",
     say: "Hello... mera order kal aana tha... it hasn't arrived yet... order number is 4582... no sorry, 4852.",
-    expect: "Intent: Delivery complaint · Order ID ambiguous (4582 / 4852) · Escalates to Human",
+    expect:
+      "Intent: Delivery complaint · Order ID ambiguous (4582 / 4852) · Escalates to Human",
     escalates: true,
     language: "hi",
     tags: ["multilingual", "ambiguity", "escalation"],
@@ -178,29 +181,32 @@ export default function App() {
     });
   }, [turns, liveTranscript, phase]);
 
-  const push = useCallback((who: Turn["who"], text: string, elapsedOverride?: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    const elapsed =
-      elapsedOverride ||
-      (callStartTimeRef.current
-        ? formatElapsed(Date.now() - callStartTimeRef.current)
-        : "00:00");
-    setTurns((prev) => {
-      // Avoid duplicate consecutive/recent messages from same speaker
-      const recent = prev.slice(-3);
-      if (
-        recent.some(
-          (m) =>
-            m.who === who &&
-            m.text.trim().toLowerCase() === trimmed.toLowerCase(),
-        )
-      ) {
-        return prev;
-      }
-      return [...prev, { id: ++turnId, who, text: trimmed, elapsed }];
-    });
-  }, []);
+  const push = useCallback(
+    (who: Turn["who"], text: string, elapsedOverride?: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      const elapsed =
+        elapsedOverride ||
+        (callStartTimeRef.current
+          ? formatElapsed(Date.now() - callStartTimeRef.current)
+          : "00:00");
+      setTurns((prev) => {
+        // Avoid duplicate consecutive/recent messages from same speaker
+        const recent = prev.slice(-3);
+        if (
+          recent.some(
+            (m) =>
+              m.who === who &&
+              m.text.trim().toLowerCase() === trimmed.toLowerCase(),
+          )
+        ) {
+          return prev;
+        }
+        return [...prev, { id: ++turnId, who, text: trimmed, elapsed }];
+      });
+    },
+    [],
+  );
 
   const sendText = useCallback(
     async (text: string, confidence = 1) => {
@@ -418,7 +424,10 @@ export default function App() {
     try {
       callStartTimeRef.current = Date.now();
       // 1. Initialize Call record on backend
-      const call = await api.startCall(language);
+      const call = await api.startCall(language, undefined, {
+        callerName: callerName.trim() || undefined,
+        callerPhone: callerPhone.trim() || undefined,
+      });
       setCallId(call.callId);
       callIdRef.current = call.callId;
       push("system", `Connected · case ${call.caseRef}`);
@@ -503,7 +512,9 @@ export default function App() {
                   caseRef:
                     (sig.payload?.caseRef as string) || prev?.caseRef || null,
                   stateSummary:
-                    sig.payload?.stateSummary || prev?.stateSummary || undefined,
+                    sig.payload?.stateSummary ||
+                    prev?.stateSummary ||
+                    undefined,
                 }));
               }
               break;
@@ -870,6 +881,33 @@ export default function App() {
                 </span>
               </div>
 
+              {!live && (
+                <div
+                  className="row"
+                  style={{ gap: "8px", marginBottom: "10px" }}
+                >
+                  <input
+                    aria-label="Your name (optional)"
+                    placeholder="Your name (optional)"
+                    value={callerName}
+                    onChange={(e) => setCallerName(e.target.value)}
+                    disabled={
+                      phase === "connecting" || phase === "starting_agent"
+                    }
+                  />
+                  <input
+                    aria-label="Phone number (optional)"
+                    placeholder="Phone number (optional)"
+                    inputMode="tel"
+                    value={callerPhone}
+                    onChange={(e) => setCallerPhone(e.target.value)}
+                    disabled={
+                      phase === "connecting" || phase === "starting_agent"
+                    }
+                  />
+                </div>
+              )}
+
               <div className="row">
                 {live ? (
                   <>
@@ -1055,7 +1093,8 @@ export default function App() {
                       color: "#06b6d4",
                     }}
                   >
-                    <Mic size={12} className="animate-pulse" /> You (speaking live...)
+                    <Mic size={12} className="animate-pulse" /> You (speaking
+                    live...)
                   </span>
                   {liveTranscript}
                 </div>
@@ -1206,7 +1245,9 @@ function ConversationStateManagerCard({
   const reqCustomer = stateSummary
     ? stateSummary.requiredInfo.customerIdentity
     : Boolean(v.nameMatches === true || v.ordererName);
-  const reqOrder = stateSummary ? stateSummary.requiredInfo.orderId : v.confirmed;
+  const reqOrder = stateSummary
+    ? stateSummary.requiredInfo.orderId
+    : v.confirmed;
 
   const confirmedFacts = stateSummary?.confirmedFacts?.length
     ? stateSummary.confirmedFacts
@@ -1227,8 +1268,7 @@ function ConversationStateManagerCard({
       ];
 
   const orderIdConf =
-    stateSummary?.confidenceBreakdown.orderIdPercent ??
-    (v.confirmed ? 98 : 47);
+    stateSummary?.confidenceBreakdown.orderIdPercent ?? (v.confirmed ? 98 : 47);
   const attempts = stateSummary?.attempts.orderId ?? Math.max(1, v.attempts);
   const decision =
     stateSummary?.decision ??
@@ -1294,7 +1334,9 @@ function ConversationStateManagerCard({
             }`,
           }}
         >
-          {decision === "CONTINUE" ? "Decision: CONTINUE" : "Decision: ESCALATE"}
+          {decision === "CONTINUE"
+            ? "Decision: CONTINUE"
+            : "Decision: ESCALATE"}
         </span>
       </div>
 

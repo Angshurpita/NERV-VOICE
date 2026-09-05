@@ -142,10 +142,12 @@ const customLlmHealthHandler = (_req: any, res: any) => {
     ok: true,
     service: "agora-custom-llm",
     endpoint: "/api/agora/openai/v1/chat/completions",
-    sttProvider: "deepgram",
-    ttsProvider: "deepgram_aura",
-    ttsModel: config.deepgram.ttsModel,
+    sttProvider: config.voice.sttProvider,
+    ttsProvider: config.voice.ttsProvider,
+    ttsModel: config.voice.ttsModel,
+    ttsVoice: config.voice.ttsVoice,
     llmConfigured: Boolean(config.agora.llmUrl),
+    llmReachable: config.agora.llmUrlReachable,
   });
 };
 
@@ -153,13 +155,72 @@ agoraRouter.get("/openai/health", customLlmHealthHandler);
 agoraRouter.get("/openai/v1/health", customLlmHealthHandler);
 
 /**
+ * Bearer check for the CustomLLM webhook.
+ *
+ * `agent-worker.ts` sends `Authorization: Bearer ${config.AUTH_SECRET}` on every
+ * Agora CustomLLM callback, so the same secret is the shared key here.
+ */
+function hasValidBearerToken(req: any): boolean {
+  const header = req.headers?.authorization ?? req.headers?.Authorization;
+  if (typeof header !== "string") return false;
+  const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+  const token = match?.[1]?.trim();
+  return Boolean(token) && token === config.AUTH_SECRET;
+}
+
+/**
+ * Per-utterance ASR confidence, when the caller of this webhook supplies one.
+ *
+ * Agora's Conversational AI Agent does not forward an Ares confidence score in
+ * its CustomLLM callbacks — the request is a plain OpenAI chat-completion body,
+ * and `agora-agents` exposes no confidence field anywhere in its types. Rather
+ * than fabricate a number (a constant high value silently disables the
+ * read-back and repeat-the-utterance gating in `@echosphere/core`), the value
+ * is threaded through only when actually present and left undefined otherwise.
+ */
+function extractAsrConfidence(req: any): number | undefined {
+  const candidates = [
+    req.body?.asr_confidence,
+    req.body?.asrConfidence,
+    req.body?.metadata?.asr_confidence,
+    req.body?.metadata?.confidence,
+    req.headers?.["x-asr-confidence"],
+  ];
+  for (const candidate of candidates) {
+    const value = typeof candidate === "string" ? Number(candidate) : candidate;
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return Math.min(Math.max(value, 0), 1);
+    }
+  }
+  return undefined;
+}
+
+/**
  * Authoritative Custom LLM endpoint for the real Agora Conversational AI Agent.
  *
  * Pipeline:
- * Caller Microphone -> Agora RTC -> Deepgram STT -> POST /chat/completions -> EchoSphere runTurn() -> Deepgram Aura TTS -> Agora RTC
+ * Caller Microphone -> Agora RTC -> Agora Ares ASR -> POST /chat/completions -> EchoSphere runTurn() -> OpenAI TTS ("sage") -> Agora RTC
+ *
+ * The endpoint is public by necessity (Agora's cloud calls it), so it is
+ * authenticated with the same bearer token `agent-worker.ts` configures on the
+ * Cloud Agent — otherwise anyone who learns the URL can post fabricated turns
+ * into a live call.
  */
 const chatCompletionHandler = async (req: any, res: any) => {
   try {
+    if (!hasValidBearerToken(req)) {
+      logVoiceDiagnostic("PIPELINE_ERROR", {
+        error: "CustomLLM turn rejected: missing or invalid bearer token",
+      });
+      res.status(401).json({
+        error: {
+          message: "Invalid or missing authorization bearer token",
+          type: "invalid_request_error",
+        },
+      });
+      return;
+    }
+
     const messages = Array.isArray(req.body?.messages) ? req.body.messages : [];
     const userMsg = [...messages].reverse().find((m: any) => m.role === "user");
     let userUtterance = "";
@@ -167,9 +228,7 @@ const chatCompletionHandler = async (req: any, res: any) => {
       userUtterance = userMsg.content.trim();
     } else if (Array.isArray(userMsg?.content)) {
       userUtterance = userMsg.content
-        .filter(
-          (p: any) => p?.type === "text" || typeof p?.text === "string",
-        )
+        .filter((p: any) => p?.type === "text" || typeof p?.text === "string")
         .map((p: any) => p.text || p.content || "")
         .join(" ")
         .trim();
@@ -247,6 +306,7 @@ const chatCompletionHandler = async (req: any, res: any) => {
       callId,
       channelName,
       utterance: userUtterance,
+      asrConfidence: extractAsrConfidence(req),
     });
 
     logVoiceDiagnostic("ECHOSPHERE_TURN_STARTED", {
@@ -255,10 +315,12 @@ const chatCompletionHandler = async (req: any, res: any) => {
       utterance: userUtterance,
     });
 
+    const asrConfidence = extractAsrConfidence(req);
+
     const outcome = await handleTurn({
       callId,
       text: userUtterance,
-      asrConfidence: 0.95,
+      asrConfidence,
     });
 
     const reply =
@@ -275,7 +337,7 @@ const chatCompletionHandler = async (req: any, res: any) => {
     logVoiceDiagnostic("TTS_RESPONSE_STARTED", {
       callId,
       channelName,
-      ttsModel: config.deepgram.ttsModel,
+      ttsModel: config.voice.ttsModel,
       replyLength: reply.length,
     });
 

@@ -1,13 +1,17 @@
 import { GoogleGenAI } from "@google/genai";
 import type { ModelTurnOutput } from "@echosphere/core";
 import { TURN_RESPONSE_SCHEMA } from "@echosphere/core";
-import { config } from "./config.js";
+import {
+  config,
+  GEMINI_DEFAULT_MODEL,
+  GEMINI_FALLBACK_MODELS,
+} from "./config.js";
 
 /**
  * Gemini client using official `@google/genai` SDK.
  *
  * Gemini is the AI reasoning/LLM decisive brain. It honours `GEMINI_MODEL`
- * (defaulting to `gemini-3.7-flash`), never exposes the API key to the browser,
+ * (defaulting to `GEMINI_DEFAULT_MODEL`), never exposes the API key to the browser,
  * and seamlessly fails over to fallback flash candidates if 503 load spikes occur.
  */
 
@@ -59,12 +63,9 @@ class GeminiClient implements ModelClient {
     private readonly modelId: string,
   ) {
     this.ai = new GoogleGenAI({ apiKey });
-    const fallbacks = [
-      "gemini-3.6-flash",
-      "gemini-3.8-flash",
-      "gemini-flash-latest",
-    ];
-    this.modelsToTry = Array.from(new Set([modelId, ...fallbacks]));
+    this.modelsToTry = Array.from(
+      new Set([modelId || GEMINI_DEFAULT_MODEL, ...GEMINI_FALLBACK_MODELS]),
+    );
   }
 
   readonly available = true;

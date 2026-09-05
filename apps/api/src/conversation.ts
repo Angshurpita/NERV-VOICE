@@ -119,6 +119,11 @@ export interface TurnOutcome {
  * Everything sequenced here is deliberate: transcript first (so a crash mid-turn
  * still leaves a record of what the caller said), then the engine, then
  * persistence, then case creation only if the engine actually escalated.
+ *
+ * Requests for a human are not special-cased here. `detectHumanRequest()` in the
+ * engine recognises them in all the ways callers actually phrase them and feeds
+ * the retention ladder, which decides when a handover is due; an operator-driven
+ * force transfer is `POST /api/calls/:id/transfer`.
  */
 export async function handleTurn(input: {
   callId: string;
@@ -155,33 +160,6 @@ export async function handleTurn(input: {
   agoraService.publishSignalling(call.id, "gemini_thinking", {
     callId: call.id,
   });
-
-  const isDirectTransfer =
-    /^\s*(transfer|call transfer|transfer me|transfer call|handover|human transfer|human agent|transfer to human|connect to human|connect to agent|baat karwao|transfer karo|ट्रांसफर)\s*$/i.test(
-      input.text.trim(),
-    );
-  if (isDirectTransfer) {
-    const outcome = await transferCall(call.id, "CUSTOMER_INSISTED_HUMAN");
-    if ("error" in outcome) return outcome;
-    const freshCall = await db.calls.findById(call.id);
-    const resolvedState = (freshCall?.state as any) || state;
-    const stateSummary = buildConversationStateSummary(
-      resolvedState,
-      null,
-      "ESCALATE",
-    );
-    return {
-      reply: outcome.reply,
-      language: outcome.language,
-      state: resolvedState,
-      escalated: true,
-      escalationReason: outcome.reason,
-      caseRef: outcome.caseRef,
-      order: null,
-      step: outcome.step,
-      stateSummary,
-    };
-  }
 
   const model = getModel();
   let result: TurnResult;
@@ -360,7 +338,9 @@ async function summarise(
     report.orderConfirmed
       ? "Order and customer identity confirmed by AI."
       : "Order ID unverified due to digit transposition ambiguity during voice speech. Transferred to human specialist.",
-    report.statedReason ? `Caller's stated issue: "${report.statedReason}".` : "Package was expected yesterday (Aug 21) and has not arrived.",
+    report.statedReason
+      ? `Caller's stated issue: "${report.statedReason}".`
+      : "Package was expected yesterday (Aug 21) and has not arrived.",
     report.policyFindings.length > 0 ? report.policyFindings.join(" ") : "",
   ]
     .filter(Boolean)

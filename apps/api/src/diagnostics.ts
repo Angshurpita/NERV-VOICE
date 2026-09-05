@@ -2,7 +2,7 @@
  * Structured Voice Pipeline Diagnostics.
  *
  * Implements authoritative observability across the Agora Conversational AI,
- * Deepgram STT, EchoSphere turn decision engine, and Deepgram Aura TTS pipeline.
+ * Agora Ares ASR, EchoSphere turn decision engine, and OpenAI TTS pipeline.
  */
 
 export type VoiceDiagnosticEvent =

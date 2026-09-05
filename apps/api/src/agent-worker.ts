@@ -3,8 +3,6 @@ import {
   Agent,
   Area,
   AresSTT,
-  DeepgramSTT,
-  DeepgramTTS,
   OpenAI,
   OpenAITTS,
   CustomLLM,
@@ -12,7 +10,7 @@ import {
 } from "agora-agents";
 import type { LanguageCode } from "@echosphere/core";
 import { getDatabase } from "@echosphere/db";
-import { config, isPrivateOrLocalhostUrl } from "./config.js";
+import { config, describeLlmMisconfiguration } from "./config.js";
 import { logVoiceDiagnostic } from "./diagnostics.js";
 
 export interface ManagedSession {
@@ -32,7 +30,7 @@ export interface ManagedSession {
  * Persistent Agent Worker.
  *
  * Coordinates the REAL Agora Conversational AI Agent lifecycle:
- * - Creates authentic Agora Agent instances using Deepgram STT and Deepgram Aura TTS
+ * - Creates authentic Agora Agent instances using Agora Ares ASR and OpenAI TTS ("sage")
  * - Routes all caller speech directly into EchoSphere's authoritative CustomLLM endpoint
  * - Maintains zero local conversational fallbacks, zero polling, and zero duplicated turns
  */
@@ -80,7 +78,7 @@ export class AgentWorker {
    * Starts a real Agora Conversational AI Agent for a call.
    *
    * Single authoritative voice pipeline:
-   * Caller Microphone -> Agora RTC -> Deepgram STT -> EchoSphere CustomLLM -> Deepgram Aura TTS -> Caller Speaker
+   * Caller Microphone -> Agora RTC -> Agora Ares ASR -> EchoSphere CustomLLM -> OpenAI TTS ("sage") -> Caller Speaker
    */
   async startSession(input: {
     callId: string;
@@ -108,6 +106,10 @@ export class AgentWorker {
       callId,
       channelName,
       language,
+      llmUrl: config.agora.llmUrl || null,
+      llmMode: config.agora.llmUrlReachable
+        ? "custom_llm"
+        : "agora_managed_openai_fallback",
     });
 
     if (!config.agora.cloudAgentEnabled) {
@@ -120,7 +122,24 @@ export class AgentWorker {
 
     // Determine the EchoSphere CustomLLM endpoint if available and public
     const baseLlmUrl = config.agora.llmUrl;
-    const useCustomLlm = Boolean(baseLlmUrl && !isPrivateOrLocalhostUrl(baseLlmUrl));
+    const useCustomLlm = config.agora.llmUrlReachable;
+    const llmIssue = describeLlmMisconfiguration();
+
+    if (!useCustomLlm) {
+      logVoiceDiagnostic("PIPELINE_ERROR", {
+        callId,
+        channelName,
+        error: `CustomLLM endpoint unusable: ${llmIssue ?? "unknown reason"}`,
+        llmUrl: baseLlmUrl || null,
+      });
+
+      if (!config.agora.allowManagedLlmFallback) {
+        return {
+          ok: false,
+          error: `Refusing to start the Agora Cloud Agent: ${llmIssue ?? "the CustomLLM endpoint is not reachable from Agora's cloud"} Without it the call would run on Agora's managed model, bypassing EchoSphere's verification and escalation engine entirely. Set AGORA_ALLOW_MANAGED_LLM_FALLBACK=true to start a transport-only demo session anyway.`,
+        };
+      }
+    }
 
     // Stop any previous active session for this call or channel
     await this.stopSession(callId);
@@ -139,6 +158,7 @@ export class AgentWorker {
         callId,
         channelName,
         targetLlmUrl,
+        llmMode: useCustomLlm ? "custom_llm" : "agora_managed_openai_fallback",
       });
 
       let agent = new Agent({
@@ -189,7 +209,7 @@ export class AgentWorker {
         // 2. TTS: OpenAI TTS with Sage voice (Agora-managed preset, matches Agora Console)
         .withTts(
           new OpenAITTS({
-            voice: "sage",
+            voice: config.voice.ttsVoice as "sage",
           }),
         );
 
@@ -214,7 +234,9 @@ export class AgentWorker {
                   "You are the Nerv customer support voice assistant. Help callers with their order tracking, delivery issues, refunds, and human escalation.",
               },
             ],
-            ...(input.customGreeting ? { greetingMessage: input.customGreeting } : {}),
+            ...(input.customGreeting
+              ? { greetingMessage: input.customGreeting }
+              : {}),
           }),
         );
       } else {
@@ -228,7 +250,9 @@ export class AgentWorker {
                   "You are the voice support agent for Nerv e-commerce customer service. Speak concisely, clearly, and helpfully. Assist callers with order tracking, delivery issues, cancellations, and returns.",
               },
             ],
-            ...(input.customGreeting ? { greetingMessage: input.customGreeting } : {}),
+            ...(input.customGreeting
+              ? { greetingMessage: input.customGreeting }
+              : {}),
           }),
         );
       }
@@ -275,8 +299,9 @@ export class AgentWorker {
         channelName,
         agentId,
         agentRtcUid,
-        sttModel: "agora-ares",
-        ttsModel: "openai-tts-1-sage",
+        sttModel: config.voice.sttModel,
+        ttsModel: `${config.voice.ttsModel}-${config.voice.ttsVoice}`,
+        llmMode: useCustomLlm ? "custom_llm" : "agora_managed_openai_fallback",
         llmUrl: useCustomLlm ? targetLlmUrl : "openai_gpt_4o_mini",
       });
 
