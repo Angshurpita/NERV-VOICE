@@ -38,10 +38,11 @@ function bool(key: string, fallback: boolean): boolean {
  * Single source of truth for the Gemini model, so `.env.example`, the coded
  * default and `model.ts`'s failover order cannot drift apart again.
  */
-export const GEMINI_DEFAULT_MODEL = "gemini-3.8-flash";
+export const GEMINI_DEFAULT_MODEL = "gemini-2.0-flash";
 export const GEMINI_FALLBACK_MODELS = [
-  GEMINI_DEFAULT_MODEL,
-  "gemini-3.6-flash",
+  "gemini-2.0-flash",
+  "gemini-1.5-flash",
+  "gemini-2.5-flash",
   "gemini-flash-latest",
 ] as const;
 

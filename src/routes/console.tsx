@@ -867,7 +867,7 @@ function ConsolePage() {
               : [
                   {
                     label: "Order ID",
-                    value: v?.orderId ? `${v.orderId} (pending readback)` : "4582 / 4852",
+                    value: v?.orderId ? `${v.orderId} (pending readback)` : "Unknown",
                   },
                 ];
             const orderIdPercent = sm?.confidenceBreakdown.orderIdPercent ?? (v?.confirmed ? 98 : 47);

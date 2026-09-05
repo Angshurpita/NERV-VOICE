@@ -257,12 +257,12 @@ async function createCase(call: CallRow, result: TurnResult): Promise<string> {
     report.ordererName ?? state.customer.name ?? call.callerName;
 
   if (!customerName || customerName === "Unidentified caller") {
-    const candidateId = report.orderId || state.verification.orderId || "4852";
-    const lookedUp = await db.orders.lookup(candidateId);
-    if (lookedUp.outcome === "found" && lookedUp.customer?.name) {
-      customerName = lookedUp.customer.name;
-    } else {
-      customerName = "Rahul Sharma";
+    const candidateId = report.orderId || state.verification.orderId;
+    if (candidateId) {
+      const lookedUp = await db.orders.lookup(candidateId);
+      if (lookedUp.outcome === "found" && lookedUp.customer?.name) {
+        customerName = lookedUp.customer.name;
+      }
     }
   }
 

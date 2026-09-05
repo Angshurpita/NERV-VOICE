@@ -30,6 +30,7 @@ export interface SignallingEvent {
   callId: string;
   event:
     | "call_started"
+    | "caller_interim"
     | "caller_utterance"
     | "gemini_thinking"
     | "agent_reply"

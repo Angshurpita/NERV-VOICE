@@ -665,12 +665,12 @@ export function buildConversationStateSummary(
     const candidates =
       orderIdField.candidates.length > 0
         ? orderIdField.candidates.map((c) => c.value)
-        : ["4582", "4852"];
+        : [];
     const displayVal =
       orderIdField.display ||
       (candidates.length > 1
         ? candidates.join(" / ")
-        : candidates[0] || "4582 / 4852");
+        : candidates[0] || "Unknown");
     unconfirmedFacts.push({
       label: "Order ID",
       value: displayVal,
@@ -679,8 +679,8 @@ export function buildConversationStateSummary(
   } else if (!orderIdConfirmed) {
     unconfirmedFacts.push({
       label: "Order ID",
-      value: "4582 / 4852",
-      candidates: ["4582", "4852"],
+      value: "Unknown",
+      candidates: [],
     });
   }
 

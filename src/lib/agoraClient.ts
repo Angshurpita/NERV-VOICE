@@ -23,10 +23,30 @@ export class AgoraCallManager {
   onRemoteUserLeft?: (uid: string | number) => void;
   onStreamMessage?: (data: any) => void;
   onError?: (err: Error) => void;
+
+  async requestMicrophone(): Promise<void> {
+    if (this.localAudioTrack) return;
+    try {
+      this.localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack({
+        AEC: true,
+        ANS: true,
+        AGC: true,
+      });
+    } catch (audioErr: any) {
+      console.error("[Agora] Microphone track creation failed:", audioErr);
+      throw new Error(
+        `Microphone access denied or unavailable: ${audioErr?.message || String(audioErr)}. A real microphone is required for voice calls.`,
+      );
+    }
+  }
+
   async join(params: AgoraConnection): Promise<void> {
     if (this.isJoined) return;
 
     try {
+      // Ensure microphone is requested early to avoid gesture timeout
+      await this.requestMicrophone();
+
       this.client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
 
       // Listen for remote audio from the Agora Conversational AI Agent
@@ -94,23 +114,6 @@ export class AgoraCallManager {
         params.uid || null,
       );
 
-      // Create and publish local microphone stream
-      // CRITICAL REQUIREMENT: Real voice calls MUST have working microphone audio.
-      // If microphone cannot be created or published, the call MUST fail immediately.
-      try {
-        this.localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack({
-          AEC: true, // Acoustic Echo Cancellation
-          ANS: true, // Automatic Noise Suppression
-          AGC: true, // Automatic Gain Control
-        });
-      } catch (audioErr: any) {
-        console.error("[Agora] Microphone track creation failed:", audioErr);
-        await this.leave().catch(() => undefined);
-        throw new Error(
-          `Microphone access denied or unavailable: ${audioErr?.message || String(audioErr)}. A real microphone is required for voice calls.`,
-        );
-      }
-
       try {
         await this.client.publish([this.localAudioTrack]);
       } catch (pubErr: any) {
@@ -147,18 +150,6 @@ export class AgoraCallManager {
   setMute(muted: boolean): void {
     if (this.localAudioTrack) {
       this.localAudioTrack.setEnabled(!muted);
-    }
-  }
-
-  sendStreamMessage(text: string): boolean {
-    if (!this.client) return false;
-    try {
-      const data = new TextEncoder().encode(text);
-      this.client.sendStreamMessage(data);
-      return true;
-    } catch (err) {
-      console.error("[Agora] Error sending stream message:", err);
-      return false;
     }
   }
 

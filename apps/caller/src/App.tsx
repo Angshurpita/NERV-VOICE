@@ -57,6 +57,46 @@ function formatElapsed(ms: number): string {
 
 let turnId = 0;
 
+if (typeof window !== "undefined" && "speechSynthesis" in window) {
+  window.speechSynthesis.getVoices();
+  window.speechSynthesis.onvoiceschanged = () => {
+    window.speechSynthesis.getVoices();
+  };
+}
+
+function playFallbackSpeech(text: string, lang: string, onEnd?: () => void) {
+  if (!("speechSynthesis" in window)) return;
+  try {
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = lang === "hi" ? "hi-IN" : "en-US";
+    
+    const voices = window.speechSynthesis.getVoices();
+    if (voices.length > 0) {
+      let preferred = voices.find(v => v.name.toLowerCase().includes("sage") || v.name.toLowerCase().includes("radiant"));
+      if (!preferred) {
+        preferred = voices.find(v => 
+          v.name.includes("Samantha") || 
+          v.name.includes("Victoria") || 
+          v.name.includes("Google US English") || 
+          v.name.includes("Zira") || 
+          v.name.toLowerCase().includes("female")
+        );
+      }
+      if (preferred) {
+        utter.voice = preferred;
+      }
+    }
+    
+    if (onEnd) {
+      utter.onend = onEnd;
+    }
+    window.speechSynthesis.speak(utter);
+  } catch {
+    // ignore
+  }
+}
+
 export default function App() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [callId, setCallId] = useState<string | null>(null);
@@ -145,21 +185,9 @@ export default function App() {
     };
 
     agoraCallManager.onStreamMessage = (data: any) => {
-      const text =
-        data?.text ||
-        data?.content ||
-        data?.words ||
-        data?.message ||
-        (typeof data === "string" ? data : "");
-      if (text && typeof text === "string" && text.trim()) {
-        const isUser =
-          data?.type === "user" ||
-          data?.speaker === "user" ||
-          data?.role === "user" ||
-          data?.from === "caller";
-        const sender = isUser ? "caller" : "agent";
-        push(sender, text.trim());
-      }
+      // The Agora Conversational AI Agent sends base64/protobuf diagnostic STT data 
+      // over the stream channel. We ignore it here because the backend SSE channel
+      // already pushes perfectly clean 'agent_reply' and 'caller_utterance' events.
     };
 
     agoraCallManager.onError = (err) => {
@@ -229,19 +257,11 @@ export default function App() {
           setPhase("agent_speaking");
           // Fallback speech synthesis if Agora remote audio is not active
           if (!agoraCallManager.hasRemoteAudio && "speechSynthesis" in window) {
-            try {
-              window.speechSynthesis.cancel();
-              const utter = new SpeechSynthesisUtterance(result.reply);
-              utter.lang = result.language === "hi" ? "hi-IN" : "en-US";
-              utter.onend = () => {
-                if (phaseRef.current === "agent_speaking") {
-                  setPhase("listening");
-                }
-              };
-              window.speechSynthesis.speak(utter);
-            } catch {
-              // ignore
-            }
+            playFallbackSpeech(result.reply, result.language, () => {
+              if (phaseRef.current === "agent_speaking") {
+                setPhase("listening");
+              }
+            });
           }
           setTimeout(() => {
             if (phaseRef.current === "agent_speaking") {
@@ -600,11 +620,16 @@ export default function App() {
     const currentCallId = callIdRef.current;
     if (!currentCallId) return;
     setPhase("escalating");
+
     try {
       const res = await api.transferCall(
         currentCallId,
         "CUSTOMER_INSISTED_HUMAN",
       );
+
+      // Stop the AI agent immediately so it doesn't keep talking during the transfer wait
+      await api.stopCloudAgent("", undefined, currentCallId).catch(() => undefined);
+
       push("agent", res.reply);
       push(
         "system",
@@ -613,14 +638,7 @@ export default function App() {
           : "Transferred to human specialist",
       );
       if ("speechSynthesis" in window) {
-        try {
-          window.speechSynthesis.cancel();
-          const utter = new SpeechSynthesisUtterance(res.reply);
-          utter.lang = res.language === "hi" ? "hi-IN" : "en-US";
-          window.speechSynthesis.speak(utter);
-        } catch {
-          // ignore
-        }
+        playFallbackSpeech(res.reply, res.language);
       }
     } catch (e: any) {
       setError(e.message || "Transfer failed");
@@ -1038,7 +1056,7 @@ export default function App() {
             </div>
 
             <div className="transcript" ref={transcriptRef}>
-              {turns.length === 0 && !liveTranscript && (
+              {turns.length === 0 && (
                 <div className="bubble system">
                   Press "Call support" to start. Speak into your microphone once
                   connected, or pick a scenario on the right.
@@ -1072,33 +1090,9 @@ export default function App() {
                       )}
                     </div>
                   )}
-                  {t.text}
+                  {t.text.replace(/[*_~`]/g, "")}
                 </div>
               ))}
-              {liveTranscript && (
-                <div
-                  className="bubble caller interim animate-pulse"
-                  style={{
-                    borderStyle: "dashed",
-                    borderColor: "#06b6d4",
-                    background: "rgba(6, 182, 212, 0.12)",
-                  }}
-                >
-                  <span
-                    className="who"
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "4px",
-                      color: "#06b6d4",
-                    }}
-                  >
-                    <Mic size={12} className="animate-pulse" /> You (speaking
-                    live...)
-                  </span>
-                  {liveTranscript}
-                </div>
-              )}
               {phase === "processing" && (
                 <div
                   className="bubble agent thinking"
@@ -1263,7 +1257,7 @@ function ConversationStateManagerCard({
     : [
         {
           label: "Order ID",
-          value: v.orderId ? `${v.orderId} (pending readback)` : "4582 / 4852",
+          value: v.orderId ? `${v.orderId} (pending readback)` : "Unknown",
         },
       ];
 

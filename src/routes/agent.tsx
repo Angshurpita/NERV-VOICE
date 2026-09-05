@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   AlertTriangle,
   Bot,
@@ -24,6 +24,7 @@ import {
   titleCase,
   type Escalation,
 } from "@/lib/api";
+import { agoraCallManager } from "@/lib/agoraClient";
 import {
   CardHeader,
   EmptyState,
@@ -63,6 +64,19 @@ function HandoverQueue() {
     queryFn: async () => (await api.escalations.list()).escalations,
     refetchInterval: 12_000,
   });
+
+  useEffect(() => {
+    const sse = new EventSource(`${api.baseUrl}/api/agora/signalling/stream`);
+    sse.onmessage = (e) => {
+      try {
+        const sig = JSON.parse(e.data);
+        if (sig.event === "escalation_triggered") {
+          void refetch();
+        }
+      } catch (err) {}
+    };
+    return () => sse.close();
+  }, [refetch]);
 
   const selected = queue?.find((e) => e.id === selectedId) ?? null;
 
@@ -186,6 +200,13 @@ function EscalationDetail({
   const [resolution, setResolution] = useState("");
   const [busy, setBusy] = useState<"accept" | "resolve" | null>(null);
 
+  // Leave channel if navigating away
+  useEffect(() => {
+    return () => {
+      agoraCallManager.leave().catch(() => {});
+    };
+  }, [escalation.id]);
+
   const { data } = useQuery({
     queryKey: ["escalation", escalation.id],
     queryFn: () => api.escalations.get(escalation.id),
@@ -196,7 +217,21 @@ function EscalationDetail({
   const accept = async () => {
     setBusy("accept");
     try {
+      // Request microphone immediately upon click to prevent browser from blocking it
+      // due to asynchronous network delays.
+      await agoraCallManager.requestMicrophone();
+
       await api.escalations.accept(escalation.id);
+      
+      // Fetch the call to get its channel name, then join Agora RTC
+      const { call } = await api.calls.get(escalation.callId);
+      const channelName = call.channelName || `nerv_${call.id}`;
+      const tokens = await api.agora.channel(channelName, 0);
+      await agoraCallManager.join(tokens);
+
+      // Tell the backend to kill the AI agent so the human can take over
+      await api.agora.stopAgent(channelName, call.id);
+
       onChanged();
       toast.success("Call accepted! You are now speaking with the customer.");
     } catch (e) {
@@ -214,6 +249,8 @@ function EscalationDetail({
     setBusy("resolve");
     try {
       await api.escalations.resolve(escalation.id, resolution.trim());
+      await agoraCallManager.leave().catch(() => {});
+      
       onChanged();
       setResolution("");
       toast.success("Case resolved and ticketing system updated.");
@@ -246,9 +283,9 @@ function EscalationDetail({
       : Math.round((escalation.confidenceOverall || 0.47) * 100);
 
   const candidateOrderId =
-    report?.orderId && !report.orderConfirmed
-      ? `${report.orderId} / 4852`
-      : report?.orderId ?? "4582 / 4852";
+    escalation.orderId && escalation.orderId.trim() !== ""
+      ? escalation.orderId
+      : report?.orderId ?? "Unknown";
 
   return (
     <SurfaceCard className="flex max-h-[calc(100vh-7rem)] flex-col overflow-hidden">
@@ -345,9 +382,11 @@ function EscalationDetail({
                     {candidateOrderId}
                   </span>
                 </div>
-                <p className="text-[11px] opacity-90 mt-1">
-                  ⚠ Caller hesitated / changed number during voice input (4582 vs 4852). Confirm with customer.
-                </p>
+                {!report?.orderConfirmed && (
+                  <div className="flex gap-2 rounded bg-amber-500/10 p-2 text-amber-600 dark:text-amber-400">
+                    ⚠ Caller hesitated / changed number during voice input. Confirm with customer.
+                  </div>
+                )}
               </div>
               {report?.statedReason && (
                 <div className="text-muted-foreground text-[11.5px]">
@@ -398,7 +437,7 @@ function EscalationDetail({
           </h3>
           <p className="text-xs leading-relaxed text-foreground/90">
             {escalation.aiSummary ||
-              `Customer ${escalation.customerName} called regarding delayed delivery expected yesterday (Aug 21). Multiple order IDs mentioned (4582 / 4852). Automated voice confidence below threshold; handed over to human specialist.`}
+              `Customer ${escalation.customerName} called. Automated voice confidence below threshold; handed over to human specialist.`}
           </p>
         </div>
 

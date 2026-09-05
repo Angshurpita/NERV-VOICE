@@ -137,6 +137,7 @@ export interface TicketStats {
 export interface Call {
   id: string;
   caseRef: string;
+  channelName: string | null;
   callerName: string | null;
   callerPhone: string | null;
   language: "en" | "hi";
@@ -466,6 +467,25 @@ export const api = {
         escalationReasons: Breakdown[];
         languages: Breakdown[];
       }>("/api/analytics/breakdowns"),
+  },
+
+  agora: {
+    channel: (channelName: string, uid?: number) =>
+      request<{
+        appId: string;
+        channelName: string;
+        uid: number;
+        rtcToken: string;
+        rtmToken: string;
+      }>("/api/agora/channel", {
+        method: "POST",
+        ...body({ channelName, uid }),
+      }),
+    stopAgent: (channelName: string, callId?: string) =>
+      request("/api/agora/agent/stop", {
+        method: "POST",
+        ...body({ channelName, callId }),
+      }),
   },
 
   catalogue: {
