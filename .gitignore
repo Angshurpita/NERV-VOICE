@@ -52,3 +52,4 @@ dev-store.json
 *.sln
 *.sw?
 
+.vercel
